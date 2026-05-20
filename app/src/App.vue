@@ -372,20 +372,5 @@ onBeforeUnmount(() => {
         </ul>
       </div>
     </section>
-
-    <section class="card shadow-sm border-0">
-      <div class="card-body">
-        <h2 class="section-title">Open-Source Runtime Stack</h2>
-        <ul class="mb-2">
-          <li>Vue 3.5, Pinia, Vite - MIT</li>
-          <li>wavesurfer.js - BSD-3-Clause</li>
-          <li>soundtouchjs - LGPL-2.1</li>
-          <li>idb - Apache-2.0</li>
-        </ul>
-        <p class="text-body-secondary mb-0">
-          Policy: Permissive + LGPL only. GPL runtime dependencies blocked in v1.
-        </p>
-      </div>
-    </section>
   </main>
 </template>
