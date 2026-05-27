@@ -87,6 +87,25 @@ function normalizeTime(timeSec: number, durationSec: number): number {
   return clamp(timeSec, 0, max)
 }
 
+type PermissionQueryHandle = FileSystemDirectoryHandle & {
+  queryPermission?: (descriptor: { mode: 'read' | 'readwrite' }) => Promise<PermissionState>
+  requestPermission?: (descriptor: { mode: 'read' | 'readwrite' }) => Promise<PermissionState>
+}
+
+async function getDirectoryReadPermission(
+  handle: FileSystemDirectoryHandle,
+  policy: 'check-only' | 'check-then-request',
+): Promise<PermissionState> {
+  const permissionHandle = handle as PermissionQueryHandle
+  const permission = permissionHandle.queryPermission
+    ? await permissionHandle.queryPermission({ mode: 'read' })
+    : 'granted'
+  if (permission === 'granted' || policy === 'check-only') {
+    return permission
+  }
+  return permissionHandle.requestPermission ? await permissionHandle.requestPermission({ mode: 'read' }) : permission
+}
+
 export const usePracticeStore = defineStore('practice', () => {
   const engine = new AudioEngine()
   const autosaveSuspended = ref(false)
@@ -98,6 +117,7 @@ export const usePracticeStore = defineStore('practice', () => {
   const isScanning = ref(false)
   const scanError = ref('')
   const folderConnected = ref(false)
+  const hasDirectoryHandle = computed(() => folderHandle.value !== null)
 
   const projectId = ref('')
   const trackName = ref('')
@@ -114,6 +134,9 @@ export const usePracticeStore = defineStore('practice', () => {
   const loop = ref<LoopRange>(createDefaultLoop(1))
   const loopSections = ref<LoopSection[]>([])
   const activeLoopSectionId = ref<string | null>(null)
+  const pendingLoopStartSec = ref<number | null>(null)
+  const pendingLoopTargetSectionId = ref<string | null>(null)
+  const loopInteractionHint = ref('')
   const markers = ref<Marker[]>([])
   const activeMarkerId = ref<string | null>(null)
   const error = ref('')
@@ -226,6 +249,9 @@ export const usePracticeStore = defineStore('practice', () => {
       loop.value = createDefaultLoop(durationSec.value)
       loopSections.value = []
       activeLoopSectionId.value = null
+      pendingLoopStartSec.value = null
+      pendingLoopTargetSectionId.value = null
+      loopInteractionHint.value = ''
       markers.value = []
       activeMarkerId.value = null
       engine.setLoop(loop.value)
@@ -439,6 +465,13 @@ export const usePracticeStore = defineStore('practice', () => {
 
     isScanning.value = true
     try {
+      const permission = await getDirectoryReadPermission(folderHandle.value, 'check-then-request')
+      if (permission !== 'granted') {
+        scanError.value = 'Folder permission missing. Reconnect with Import Folder.'
+        folderConnected.value = false
+        return
+      }
+
       tracks.value = await scanDirectoryHandle(folderHandle.value)
       folderConnected.value = true
       if (tracks.value.length === 0) {
@@ -471,12 +504,7 @@ export const usePracticeStore = defineStore('practice', () => {
 
     if (snapshot.sourceType === 'directory-handle' && snapshot.directoryHandle) {
       folderHandle.value = snapshot.directoryHandle
-      const permissionHandle = snapshot.directoryHandle as FileSystemDirectoryHandle & {
-        queryPermission?: (descriptor: { mode: 'read' | 'readwrite' }) => Promise<PermissionState>
-      }
-      const permission = permissionHandle.queryPermission
-        ? await permissionHandle.queryPermission({ mode: 'read' })
-        : 'granted'
+      const permission = await getDirectoryReadPermission(snapshot.directoryHandle, 'check-only')
       folderConnected.value = permission === 'granted'
 
       if (!folderConnected.value) {
@@ -546,6 +574,9 @@ export const usePracticeStore = defineStore('practice', () => {
       loopSections.value.find((section) => section.id === requestedActiveId) ?? loopSections.value[0] ?? null
 
     activeLoopSectionId.value = activeSection?.id ?? null
+    pendingLoopStartSec.value = null
+    pendingLoopTargetSectionId.value = null
+    loopInteractionHint.value = ''
     loop.value = activeSection
       ? {
           enabled: activeSection.enabled,
@@ -628,94 +659,108 @@ export const usePracticeStore = defineStore('practice', () => {
   }
 
   function setLoopStartFromPlayhead() {
-    if (!activeLoopSectionId.value) {
-      const endSec = clamp(currentTimeSec.value + 4, 0, durationSec.value || currentTimeSec.value + 4)
-      const created = makeLoopSection(durationSec.value || MIN_LOOP_DURATION_SEC, currentTimeSec.value, endSec)
-      created.name = `Section ${loopSections.value.length + 1}`
-      loopSections.value = [...loopSections.value, created].sort((a, b) => a.startSec - b.startSec)
-      activeLoopSectionId.value = created.id
-    }
-
-    const nextSections = loopSections.value.map((section) =>
-      section.id === activeLoopSectionId.value ? { ...section, startSec: currentTimeSec.value } : section,
-    )
-    loopSections.value = nextSections
-      .map((section) => normalizeLoopSection(section, durationSec.value || MIN_LOOP_DURATION_SEC))
-      .sort((a, b) => a.startSec - b.startSec)
-    syncActiveLoopSectionToEngine()
+    setPendingLoopStartAtTime(currentTimeSec.value, activeLoopSectionId.value)
   }
 
   function setLoopEndFromPlayhead() {
-    if (!activeLoopSectionId.value) {
-      const startSec = clamp(currentTimeSec.value - 4, 0, Math.max(0, (durationSec.value || currentTimeSec.value) - 4))
-      const created = makeLoopSection(durationSec.value || MIN_LOOP_DURATION_SEC, startSec, currentTimeSec.value)
-      created.name = `Section ${loopSections.value.length + 1}`
-      loopSections.value = [...loopSections.value, created].sort((a, b) => a.startSec - b.startSec)
-      activeLoopSectionId.value = created.id
-    }
-
-    const nextSections = loopSections.value.map((section) =>
-      section.id === activeLoopSectionId.value ? { ...section, endSec: currentTimeSec.value } : section,
-    )
-    loopSections.value = nextSections
-      .map((section) => normalizeLoopSection(section, durationSec.value || MIN_LOOP_DURATION_SEC))
-      .sort((a, b) => a.startSec - b.startSec)
-    syncActiveLoopSectionToEngine()
+    finalizeLoopEndAtTime(currentTimeSec.value)
   }
 
-  function setLoopBoundaryAtTime(boundary: 'start' | 'end', timeSec: number) {
+  function clearPendingLoopStart() {
+    pendingLoopStartSec.value = null
+    pendingLoopTargetSectionId.value = null
+  }
+
+  function setPendingLoopStartAtTime(timeSec: number, targetSectionId: string | null) {
     const duration = durationSec.value || MIN_LOOP_DURATION_SEC
     const clampedTime = normalizeTime(timeSec, duration)
-    let targetSectionId = activeLoopSectionId.value
+    pendingLoopStartSec.value = clampedTime
+    pendingLoopTargetSectionId.value = targetSectionId
+    upsertNamedMarkerAtTime('A', clampedTime)
+    loopInteractionHint.value = targetSectionId
+      ? 'Loop start (A) set. Press B to update active section.'
+      : 'Loop start (A) set. Press B to create section.'
+  }
 
-    if (!targetSectionId) {
-      const defaultStart = boundary === 'start' ? clampedTime : clamp(clampedTime - 4, 0, Math.max(0, duration - MIN_LOOP_DURATION_SEC))
-      const defaultEnd = boundary === 'end' ? clampedTime : clamp(clampedTime + 4, MIN_LOOP_DURATION_SEC, duration)
-      const created = makeLoopSection(duration, defaultStart, defaultEnd, `Section ${loopSections.value.length + 1}`)
-      loopSections.value = [...loopSections.value, created].sort((a, b) => a.startSec - b.startSec)
-      targetSectionId = created.id
-      activeLoopSectionId.value = created.id
+  function finalizeLoopEndAtTime(timeSec: number) {
+    const duration = durationSec.value || MIN_LOOP_DURATION_SEC
+    const clampedTime = normalizeTime(timeSec, duration)
+    upsertNamedMarkerAtTime('B', clampedTime)
+
+    if (pendingLoopStartSec.value == null) {
+      loopInteractionHint.value = 'Set A first, then press B.'
+      return
     }
 
-    loopSections.value = loopSections.value
-      .map((section) =>
-        section.id === targetSectionId
-          ? normalizeLoopSection(
-              {
-                ...section,
-                startSec: boundary === 'start' ? clampedTime : section.startSec,
-                endSec: boundary === 'end' ? clampedTime : section.endSec,
-              },
-              duration,
-            )
-          : section,
-      )
-      .sort((a, b) => a.startSec - b.startSec)
+    let startSec = pendingLoopStartSec.value
+    let endSec = clampedTime
+    const wasSwapped = endSec < startSec
+    if (wasSwapped) {
+      ;[startSec, endSec] = [endSec, startSec]
+    }
+
+    let targetSectionId = pendingLoopTargetSectionId.value
+    clearPendingLoopStart()
+    if (targetSectionId && !loopSections.value.some((section) => section.id === targetSectionId)) {
+      targetSectionId = null
+    }
+
+    if (targetSectionId) {
+      loopSections.value = loopSections.value
+        .map((section) =>
+          section.id === targetSectionId
+            ? normalizeLoopSection(
+                {
+                  ...section,
+                  startSec,
+                  endSec,
+                },
+                duration,
+              )
+            : section,
+        )
+        .sort((a, b) => a.startSec - b.startSec)
+      activeLoopSectionId.value = targetSectionId
+      loopInteractionHint.value = wasSwapped
+        ? 'Loop updated. End before start; boundaries swapped.'
+        : 'Loop updated from A to B.'
+    } else {
+      const section = makeLoopSection(duration, startSec, endSec, `Section ${loopSections.value.length + 1}`)
+      loopSections.value = [...loopSections.value, section].sort((a, b) => a.startSec - b.startSec)
+      activeLoopSectionId.value = section.id
+      loopInteractionHint.value = wasSwapped
+        ? 'New loop section created. End before start; boundaries swapped.'
+        : 'New loop section created from A to B.'
+    }
 
     syncActiveLoopSectionToEngine()
   }
 
   function setLoopStartAtTime(timeSec: number) {
-    setLoopBoundaryAtTime('start', timeSec)
+    setPendingLoopStartAtTime(timeSec, activeLoopSectionId.value)
   }
 
   function setLoopEndAtTime(timeSec: number) {
-    setLoopBoundaryAtTime('end', timeSec)
+    finalizeLoopEndAtTime(timeSec)
   }
 
   function resetLoop() {
+    clearPendingLoopStart()
+    loopInteractionHint.value = ''
     loop.value = createDefaultLoop(durationSec.value || 1)
     engine.setLoop(loop.value)
   }
 
+  function resetLoopDefinition() {
+    clearPendingLoopStart()
+    activeLoopSectionId.value = null
+    loop.value = createDefaultLoop(durationSec.value || 1)
+    loopInteractionHint.value = 'A/B definition cleared.'
+    engine.setLoop(loop.value)
+  }
+
   function addLoopSection() {
-    const duration = durationSec.value || MIN_LOOP_DURATION_SEC
-    const startSec = clamp(currentTimeSec.value, 0, Math.max(0, duration - MIN_LOOP_DURATION_SEC))
-    const endSec = clamp(startSec + 4, MIN_LOOP_DURATION_SEC, duration)
-    const section = makeLoopSection(duration, startSec, endSec, `Section ${loopSections.value.length + 1}`)
-    loopSections.value = [...loopSections.value, section].sort((a, b) => a.startSec - b.startSec)
-    activeLoopSectionId.value = section.id
-    syncActiveLoopSectionToEngine()
+    setPendingLoopStartAtTime(currentTimeSec.value, null)
   }
 
   function selectLoopSection(sectionId: string, jumpToStart = true) {
@@ -736,6 +781,7 @@ export const usePracticeStore = defineStore('practice', () => {
 
   function clearActiveLoopSection() {
     activeLoopSectionId.value = null
+    clearPendingLoopStart()
     loop.value = { ...loop.value, enabled: false }
     engine.setLoop(loop.value)
   }
@@ -755,6 +801,16 @@ export const usePracticeStore = defineStore('practice', () => {
 
   function removeLoopSection(sectionId: string) {
     loopSections.value = loopSections.value.filter((section) => section.id !== sectionId)
+    markers.value = markers.value.filter((marker) => {
+      const normalized = marker.label.trim().toLowerCase()
+      return normalized !== 'a' && normalized !== 'b'
+    })
+    if (activeMarkerId.value && !markers.value.some((marker) => marker.id === activeMarkerId.value)) {
+      activeMarkerId.value = markers.value[0]?.id ?? null
+    }
+    if (pendingLoopTargetSectionId.value === sectionId) {
+      pendingLoopTargetSectionId.value = null
+    }
     if (activeLoopSectionId.value !== sectionId) return
 
     const nextSection = loopSections.value[0] ?? null
@@ -910,6 +966,7 @@ export const usePracticeStore = defineStore('practice', () => {
     isScanning,
     scanError,
     folderConnected,
+    hasDirectoryHandle,
     projectId,
     trackName,
     fingerprint,
@@ -924,6 +981,8 @@ export const usePracticeStore = defineStore('practice', () => {
     loop,
     loopSections,
     activeLoopSectionId,
+    pendingLoopStartSec,
+    loopInteractionHint,
     markers,
     activeMarkerId,
     error,
@@ -944,6 +1003,7 @@ export const usePracticeStore = defineStore('practice', () => {
     setLoopStartFromPlayhead,
     setLoopEndFromPlayhead,
     resetLoop,
+    resetLoopDefinition,
     addLoopSection,
     selectLoopSection,
     clearActiveLoopSection,

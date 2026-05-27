@@ -31,9 +31,9 @@ const activeLoopSection = computed(
 const allLoopSectionsEnabled = computed(
   () => store.loopSections.length > 0 && store.loopSections.every((section) => section.enabled),
 )
-const canRefreshFolder = computed(
-  () => store.folderConnected && store.tracks.some((track) => track.sourceType === 'directory-handle') && !store.isScanning,
-)
+const canRefreshFolder = computed(() => store.hasDirectoryHandle && !store.isScanning)
+const hasPendingLoopStart = computed(() => store.pendingLoopStartSec !== null)
+const canResetLoopDefinition = computed(() => hasPendingLoopStart.value || Boolean(activeLoopSection.value))
 
 const seekPercent = computed({
   get() {
@@ -138,6 +138,8 @@ function registerShortcuts(event: KeyboardEvent) {
     store.jumpMarker(-1)
   } else if (event.key.toLowerCase() === 'm') {
     store.addMarker()
+  } else if (event.key === 'Escape') {
+    store.resetLoopDefinition()
   }
 }
 
@@ -284,10 +286,12 @@ onBeforeUnmount(() => {
             <div class="small text-body-secondary">
               <strong>Shortcuts:</strong>
               <code>Space</code> play/pause,
-              <code>A</code>/<code>B</code> loop edges,
+              <code>A</code> set loop start,
+              <code>B</code> set loop end,
+              <code>Esc</code> reset A/B,
               <code>L</code> loop on/off,
               <code>M</code> marker,
-              arrows seek/marker jump.
+              arrows seek and marker jump.
             </div>
           </div>
         </section>
@@ -363,14 +367,30 @@ onBeforeUnmount(() => {
               <div class="card-body d-flex flex-column gap-3">
                 <h2 class="section-title">Loop Controls</h2>
 
-                <div class="loop-controls-toolbar d-flex align-items-center gap-2">
+                <div class="loop-controls-toolbar d-flex flex-wrap align-items-center gap-2">
                   <button
                     type="button"
                     class="btn btn-primary"
                     :disabled="controlsDisabled"
                     @click="store.addLoopSection"
                   >
-                    Add Section
+                    {{ hasPendingLoopStart ? 'Reset A (Set Start)' : 'Set A (Start Section)' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-outline-primary"
+                    :disabled="controlsDisabled || !hasPendingLoopStart"
+                    @click="store.setLoopEndFromPlayhead"
+                  >
+                    Set B (Finalize)
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-outline-secondary"
+                    :disabled="controlsDisabled || !canResetLoopDefinition"
+                    @click="store.resetLoopDefinition"
+                  >
+                    Reset A/B
                   </button>
                   <button
                     type="button"
@@ -393,6 +413,20 @@ onBeforeUnmount(() => {
                     </select>
                   </div>
                 </div>
+                <p class="mb-0 small text-body-secondary">
+                  <span v-if="hasPendingLoopStart">
+                    Pending start A at {{ (store.pendingLoopStartSec ?? 0).toFixed(2) }}s. Set B to finalize this section.
+                  </span>
+                  <span v-else>Set A, then set B. No section is created until B is set.</span>
+                </p>
+                <p
+                  v-if="store.loopInteractionHint"
+                  class="mb-0 small"
+                  :class="store.loopInteractionHint.startsWith('Set A first') ? 'text-warning-emphasis' : 'text-info-emphasis'"
+                  aria-live="polite"
+                >
+                  {{ store.loopInteractionHint }}
+                </p>
 
                 <div class="table-responsive">
                   <table class="table table-sm align-middle mb-0">
@@ -409,7 +443,7 @@ onBeforeUnmount(() => {
                     <tbody>
                       <tr v-if="store.loopSections.length === 0">
                         <td colspan="6" class="text-body-secondary">
-                          No loop sections yet. Add one to define loopable regions.
+                          No loop sections yet. Set A then B to define a loop region.
                         </td>
                       </tr>
                       <tr

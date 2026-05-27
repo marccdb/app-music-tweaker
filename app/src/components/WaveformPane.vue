@@ -276,13 +276,11 @@ function addMarkerAtContextTime() {
 }
 
 function setLoopStartMarkerAtContextTime() {
-  store.upsertNamedMarkerAtTime('A', contextMenu.value.timeSec)
   store.setLoopStartAtTime(contextMenu.value.timeSec)
   closeContextMenu()
 }
 
 function setLoopEndMarkerAtContextTime() {
-  store.upsertNamedMarkerAtTime('B', contextMenu.value.timeSec)
   store.setLoopEndAtTime(contextMenu.value.timeSec)
   closeContextMenu()
 }
@@ -424,6 +422,8 @@ onMounted(() => {
     height: 270,
     cursorColor: colors.cursorColor,
     cursorWidth: 1,
+    autoScroll: false,
+    autoCenter: false,
     minPxPerSec: 1,
     normalize: true,
     plugins: [regionsPlugin],
