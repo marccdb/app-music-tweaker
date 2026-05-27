@@ -10,10 +10,28 @@ import {
   makeFingerprint,
 } from '../lib/math'
 import { IndexedDbProjectRepository } from '../lib/projectRepository'
-import type { LoopMode, LoopRange, LoopSection, Marker, PracticeProject } from '../types/practice'
+import {
+  createFolderTrack,
+  createTrackIndexId,
+  getRelativePathFromInputFile,
+  isSupportedMediaFile,
+  normalizeRelativePath,
+  sortTracksByPath,
+} from '../lib/folderLibrary'
+import { IndexedDbFolderLibraryRepository } from '../lib/folderLibraryRepository'
+import type {
+  FolderTrack,
+  LibrarySnapshot,
+  LoopMode,
+  LoopRange,
+  LoopSection,
+  Marker,
+  PracticeProject,
+} from '../types/practice'
 
 const SCHEMA_VERSION = 2
 const repository = new IndexedDbProjectRepository()
+const libraryRepository = new IndexedDbFolderLibraryRepository()
 
 function nextId() {
   return Math.random().toString(36).slice(2, 10)
@@ -66,6 +84,13 @@ export const usePracticeStore = defineStore('practice', () => {
   const engine = new AudioEngine()
   const autosaveSuspended = ref(false)
   const isImporting = ref(false)
+  const tracks = ref<FolderTrack[]>([])
+  const activeTrackId = ref<string | null>(null)
+  const loadingTrackId = ref<string | null>(null)
+  const folderName = ref('')
+  const isScanning = ref(false)
+  const scanError = ref('')
+  const folderConnected = ref(false)
 
   const projectId = ref('')
   const trackName = ref('')
@@ -86,6 +111,8 @@ export const usePracticeStore = defineStore('practice', () => {
   const activeMarkerId = ref<string | null>(null)
   const error = ref('')
   const loadedFile = ref<File | null>(null)
+  const folderHandle = ref<FileSystemDirectoryHandle | null>(null)
+  const transientFiles = new Map<string, File>()
 
   const currentProject = computed<PracticeProject | null>(() => {
     if (!projectId.value) return null
@@ -188,6 +215,254 @@ export const usePracticeStore = defineStore('practice', () => {
     } finally {
       isImporting.value = false
       autosaveSuspended.value = false
+    }
+  }
+
+  function makeLibrarySnapshot(sourceType: 'directory-handle' | 'webkitdirectory'): LibrarySnapshot {
+    return {
+      folderName: folderName.value,
+      tracks: tracks.value,
+      activeTrackId: activeTrackId.value,
+      sourceType,
+      directoryHandle: sourceType === 'directory-handle' ? folderHandle.value : null,
+      updatedAt: new Date().toISOString(),
+    }
+  }
+
+  function clearTransientFiles() {
+    transientFiles.clear()
+  }
+
+  async function saveLibrarySnapshot(sourceType: 'directory-handle' | 'webkitdirectory') {
+    await libraryRepository.saveSnapshot(makeLibrarySnapshot(sourceType))
+  }
+
+  async function scanDirectoryHandle(handle: FileSystemDirectoryHandle): Promise<FolderTrack[]> {
+    const discoveredTracks: FolderTrack[] = []
+    const seenTrackIds = new Set<string>()
+    clearTransientFiles()
+
+    async function walkDirectory(current: FileSystemDirectoryHandle, prefix: string) {
+      for await (const entry of current.values()) {
+        if (entry.kind === 'directory') {
+          const childPath = prefix ? `${prefix}/${entry.name}` : entry.name
+          await walkDirectory(entry, childPath)
+          continue
+        }
+
+        const fileHandle = entry as FileSystemFileHandle
+        const file = await fileHandle.getFile()
+        if (!isSupportedMediaFile(file)) {
+          continue
+        }
+
+        const relativePath = normalizeRelativePath(prefix ? `${prefix}/${entry.name}` : entry.name)
+        const baseTrack = createFolderTrack(file, relativePath, 'directory-handle')
+        const trackId = seenTrackIds.has(baseTrack.id)
+          ? createTrackIndexId(relativePath, file.lastModified, file.size)
+          : baseTrack.id
+        const track = { ...baseTrack, id: trackId }
+        seenTrackIds.add(track.id)
+        discoveredTracks.push(track)
+        transientFiles.set(track.id, file)
+      }
+    }
+
+    await walkDirectory(handle, '')
+    return sortTracksByPath(discoveredTracks)
+  }
+
+  function buildTracksFromInputFiles(files: Iterable<File>): FolderTrack[] {
+    const discoveredTracks: FolderTrack[] = []
+    const seenTrackIds = new Set<string>()
+    clearTransientFiles()
+    for (const file of files) {
+      if (!isSupportedMediaFile(file)) continue
+      const relativePath = getRelativePathFromInputFile(file)
+      const baseTrack = createFolderTrack(file, relativePath, 'webkitdirectory')
+      const trackId = seenTrackIds.has(baseTrack.id)
+        ? createTrackIndexId(relativePath, file.lastModified, file.size)
+        : baseTrack.id
+      const track = { ...baseTrack, id: trackId }
+      seenTrackIds.add(track.id)
+      discoveredTracks.push(track)
+      transientFiles.set(track.id, file)
+    }
+    return sortTracksByPath(discoveredTracks)
+  }
+
+  async function loadTrackFile(track: FolderTrack): Promise<File> {
+    const directFile = transientFiles.get(track.id)
+    if (directFile) return directFile
+
+    if (track.sourceType === 'directory-handle' && folderHandle.value) {
+      const pathParts = normalizeRelativePath(track.relativePath).split('/').filter(Boolean)
+      if (pathParts.length === 0) {
+        throw new Error('Track path is empty.')
+      }
+
+      let current = folderHandle.value
+      for (const segment of pathParts.slice(0, -1)) {
+        current = await current.getDirectoryHandle(segment)
+      }
+
+      const fileHandle = await current.getFileHandle(pathParts[pathParts.length - 1])
+      const file = await fileHandle.getFile()
+      transientFiles.set(track.id, file)
+      return file
+    }
+
+    throw new Error('Track file unavailable. Re-import folder to reconnect files.')
+  }
+
+  async function selectTrack(trackId: string): Promise<void> {
+    const track = tracks.value.find((item) => item.id === trackId)
+    if (!track) return
+
+    error.value = ''
+    scanError.value = ''
+    loadingTrackId.value = trackId
+    try {
+      const file = await loadTrackFile(track)
+      await importFile(file)
+      activeTrackId.value = trackId
+      folderConnected.value = true
+      await saveLibrarySnapshot(track.sourceType)
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : 'Failed to load selected track.'
+      scanError.value = message
+      folderConnected.value = false
+    } finally {
+      loadingTrackId.value = null
+    }
+  }
+
+  async function importFolder(): Promise<void> {
+    const pickerWindow = window as Window & { showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle> }
+    if (!pickerWindow.showDirectoryPicker) {
+      scanError.value = 'Folder picker unavailable in this browser. Use fallback folder input.'
+      return
+    }
+
+    isScanning.value = true
+    scanError.value = ''
+    try {
+      const handle = await pickerWindow.showDirectoryPicker()
+      folderHandle.value = handle
+      folderName.value = handle.name
+      tracks.value = await scanDirectoryHandle(handle)
+      activeTrackId.value = null
+      folderConnected.value = true
+
+      if (tracks.value.length === 0) {
+        scanError.value = 'No songs found.'
+      }
+
+      await saveLibrarySnapshot('directory-handle')
+    } catch (scanIssue) {
+      if (scanIssue instanceof DOMException && scanIssue.name === 'AbortError') {
+        return
+      }
+      const message = scanIssue instanceof Error ? scanIssue.message : 'Unable to import folder.'
+      scanError.value = message
+      folderConnected.value = false
+    } finally {
+      isScanning.value = false
+    }
+  }
+
+  async function importFolderFromFiles(fileList: FileList | File[]): Promise<void> {
+    isScanning.value = true
+    scanError.value = ''
+    try {
+      const files = Array.from(fileList)
+      tracks.value = buildTracksFromInputFiles(files)
+      activeTrackId.value = null
+      folderHandle.value = null
+      folderConnected.value = true
+
+      const firstRelativePath = tracks.value[0]?.relativePath || (files[0] ? getRelativePathFromInputFile(files[0]) : '')
+      const rootDir = firstRelativePath.split('/')[0]
+      folderName.value = rootDir || 'Imported Folder'
+
+      if (tracks.value.length === 0) {
+        scanError.value = files.length > 0 ? 'Unsupported file type.' : 'No songs found.'
+      }
+
+      await saveLibrarySnapshot('webkitdirectory')
+    } finally {
+      isScanning.value = false
+    }
+  }
+
+  async function refreshFolderScan(): Promise<void> {
+    scanError.value = ''
+    if (!folderHandle.value) {
+      scanError.value = 'No connected folder handle. Re-import folder.'
+      return
+    }
+
+    isScanning.value = true
+    try {
+      tracks.value = await scanDirectoryHandle(folderHandle.value)
+      folderConnected.value = true
+      if (tracks.value.length === 0) {
+        scanError.value = 'No songs found.'
+      }
+
+      if (activeTrackId.value && !tracks.value.some((track) => track.id === activeTrackId.value)) {
+        activeTrackId.value = null
+      }
+
+      await saveLibrarySnapshot('directory-handle')
+    } catch (refreshIssue) {
+      const message = refreshIssue instanceof Error ? refreshIssue.message : 'Failed to refresh folder.'
+      scanError.value = message
+      folderConnected.value = false
+    } finally {
+      isScanning.value = false
+    }
+  }
+
+  async function restoreLastFolder(): Promise<void> {
+    const snapshot = await libraryRepository.getSnapshot()
+    if (!snapshot) return
+
+    folderName.value = snapshot.folderName
+    tracks.value = sortTracksByPath(snapshot.tracks)
+    activeTrackId.value = snapshot.activeTrackId
+    scanError.value = ''
+    clearTransientFiles()
+
+    if (snapshot.sourceType === 'directory-handle' && snapshot.directoryHandle) {
+      folderHandle.value = snapshot.directoryHandle
+      const permissionHandle = snapshot.directoryHandle as FileSystemDirectoryHandle & {
+        queryPermission?: (descriptor: { mode: 'read' | 'readwrite' }) => Promise<PermissionState>
+      }
+      const permission = permissionHandle.queryPermission
+        ? await permissionHandle.queryPermission({ mode: 'read' })
+        : 'granted'
+      folderConnected.value = permission === 'granted'
+
+      if (!folderConnected.value) {
+        scanError.value = 'Folder permission missing. Reconnect with Import Folder.'
+        return
+      }
+
+      if (tracks.value.length === 0) {
+        await refreshFolderScan()
+      }
+
+      if (activeTrackId.value) {
+        await selectTrack(activeTrackId.value)
+      }
+      return
+    }
+
+    folderHandle.value = null
+    folderConnected.value = false
+    if (tracks.value.length > 0) {
+      scanError.value = 'Folder needs re-import after reload in this browser.'
     }
   }
 
@@ -515,6 +790,13 @@ export const usePracticeStore = defineStore('practice', () => {
   )
 
   return {
+    tracks,
+    activeTrackId,
+    loadingTrackId,
+    folderName,
+    isScanning,
+    scanError,
+    folderConnected,
     projectId,
     trackName,
     fingerprint,
@@ -534,6 +816,11 @@ export const usePracticeStore = defineStore('practice', () => {
     error,
     loadedFile,
     isImporting,
+    importFolder,
+    importFolderFromFiles,
+    restoreLastFolder,
+    selectTrack,
+    refreshFolderScan,
     importFile,
     setTempo,
     setPitchSemitones,

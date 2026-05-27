@@ -42,3 +42,24 @@ export interface PracticeProject {
   effects: EffectPreset
   updatedAt: string
 }
+
+export type LibrarySourceType = 'directory-handle' | 'webkitdirectory'
+
+export interface FolderTrack {
+  id: string
+  name: string
+  relativePath: string
+  fingerprint: string
+  lastModified: number
+  size: number
+  sourceType: LibrarySourceType
+}
+
+export interface LibrarySnapshot {
+  folderName: string
+  tracks: FolderTrack[]
+  activeTrackId: string | null
+  sourceType: LibrarySourceType
+  directoryHandle: FileSystemDirectoryHandle | null
+  updatedAt: string
+}

@@ -8,6 +8,8 @@ const store = usePracticeStore()
 const theme = ref<'light' | 'dark'>('light')
 const THEME_KEY = 'tuneforge-theme'
 
+const fallbackFolderInput = ref<HTMLInputElement | null>(null)
+
 const formattedTime = computed(() => {
   const format = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -22,8 +24,12 @@ const formattedTime = computed(() => {
 
 const hasLoadedTrack = computed(() => Boolean(store.loadedFile))
 const controlsDisabled = computed(() => store.isImporting || !hasLoadedTrack.value)
+const hasDirectoryPicker = computed(() => typeof window !== 'undefined' && 'showDirectoryPicker' in window)
 const activeLoopSection = computed(
   () => store.loopSections.find((section) => section.id === store.activeLoopSectionId) ?? null,
+)
+const canRefreshFolder = computed(
+  () => store.folderConnected && store.tracks.some((track) => track.sourceType === 'directory-handle') && !store.isScanning,
 )
 
 const seekPercent = computed({
@@ -43,6 +49,25 @@ async function onFileChanged(event: Event) {
   if (!file) return
   try {
     await store.importFile(file)
+  } finally {
+    target.value = ''
+  }
+}
+
+async function onImportFolderClick() {
+  if (hasDirectoryPicker.value) {
+    await store.importFolder()
+    return
+  }
+  fallbackFolderInput.value?.click()
+}
+
+async function onFallbackFolderChanged(event: Event) {
+  const target = event.target as HTMLInputElement
+  const files = target.files
+  if (!files || files.length === 0) return
+  try {
+    await store.importFolderFromFiles(files)
   } finally {
     target.value = ''
   }
@@ -108,6 +133,7 @@ onMounted(() => {
 
   applyTheme(theme.value)
   window.addEventListener('keydown', registerShortcuts)
+  void store.restoreLastFolder()
 })
 
 watch(theme, (value) => {
@@ -123,307 +149,379 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="container-fluid app-shell py-3 py-lg-4">
-    <section class="card shadow-sm border-0 mb-3">
-      <div class="card-body d-flex flex-column gap-3">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
-          <div>
-            <h1 class="display-6 fw-bold mb-1">TuneForge</h1>
-            <p class="text-body-secondary mb-0">
-              Practice studio: tempo, pitch, A/B loops, markers, per-song local save.
-            </p>
+    <div class="workspace-grid">
+      <aside class="card shadow-sm border-0 library-sidebar">
+        <div class="card-body p-0 d-flex flex-column h-100">
+          <header class="px-3 py-3 border-bottom d-flex justify-content-between align-items-center gap-2">
+            <div>
+              <h2 class="section-title mb-1">Library</h2>
+              <small class="text-body-secondary" :title="store.folderName || 'No folder connected'">
+                {{ store.folderName || 'No folder connected' }}
+              </small>
+            </div>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-secondary"
+              :disabled="!canRefreshFolder"
+              @click="store.refreshFolderScan()"
+            >
+              Refresh
+            </button>
+          </header>
+
+          <div class="library-track-list flex-grow-1">
+            <div class="p-3 text-body-secondary small" v-if="store.isScanning">Scanning folder...</div>
+            <div class="p-3 text-body-secondary small" v-else-if="store.tracks.length === 0">No songs found.</div>
+            <div class="p-3 text-danger small" v-if="store.scanError">{{ store.scanError }}</div>
+
+            <button
+              v-for="track in store.tracks"
+              :key="track.id"
+              type="button"
+              class="library-track-item"
+              :class="{
+                active: track.id === store.activeTrackId,
+                loading: track.id === store.loadingTrackId,
+              }"
+              :title="track.relativePath"
+              :disabled="store.isScanning"
+              @click="store.selectTrack(track.id)"
+            >
+              <span class="track-name">{{ track.name }}</span>
+              <span class="track-meta">{{ track.relativePath }}</span>
+              <span class="track-loading" v-if="track.id === store.loadingTrackId">Loading...</span>
+            </button>
           </div>
-          <button type="button" class="btn btn-secondary" @click="toggleTheme">
-            {{ theme === 'dark' ? 'Light Mode' : 'Dark Mode' }}
-          </button>
+
+          <div class="sidebar-footer p-3 border-top">
+            <button type="button" class="btn btn-primary w-100" :disabled="store.isScanning" @click="onImportFolderClick">
+              Import Folder
+            </button>
+            <small class="text-body-secondary d-block mt-2" v-if="!store.folderConnected && store.tracks.length > 0">
+              Reconnect folder to load tracks.
+            </small>
+          </div>
         </div>
+      </aside>
 
-        <div class="d-flex flex-wrap align-items-center gap-2">
-          <label class="btn btn-primary">
-            Import Audio
-            <input class="d-none" type="file" accept="audio/*,video/*" @change="onFileChanged" />
-          </label>
-          <span class="badge text-bg-secondary" v-if="store.trackName">{{ store.trackName }}</span>
-          <span class="badge text-bg-info" v-if="store.isImporting">Loading waveform...</span>
-        </div>
+      <section>
+        <section class="card shadow-sm border-0 mb-3">
+          <div class="card-body d-flex flex-column gap-3">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+              <div>
+                <h1 class="display-6 fw-bold mb-1">TuneForge</h1>
+                <p class="text-body-secondary mb-0">
+                  Practice studio: tempo, pitch, A/B loops, markers, per-song local save.
+                </p>
+              </div>
+              <button type="button" class="btn btn-secondary" @click="toggleTheme">
+                {{ theme === 'dark' ? 'Light Mode' : 'Dark Mode' }}
+              </button>
+            </div>
 
-        <div class="alert alert-danger py-2 px-3 mb-0" v-if="store.error">{{ store.error }}</div>
-      </div>
-    </section>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <label class="btn btn-primary">
+                Import Audio
+                <input class="d-none" type="file" accept="audio/*,video/*" @change="onFileChanged" />
+              </label>
+              <span class="badge text-bg-secondary" v-if="store.trackName">{{ store.trackName }}</span>
+              <span class="badge text-bg-info" v-if="store.isImporting">Loading waveform...</span>
+              <span class="badge text-bg-warning" v-if="!hasDirectoryPicker">Folder picker fallback mode</span>
+            </div>
 
-    <section class="card shadow-sm border-0 mb-3">
-      <div class="card-body">
-        <WaveformPane />
-      </div>
-    </section>
+            <div class="alert alert-danger py-2 px-3 mb-0" v-if="store.error">{{ store.error }}</div>
+          </div>
+        </section>
 
-    <section class="card shadow-sm border-0 mb-3">
-      <div class="card-body d-flex flex-column gap-3">
-        <div class="d-flex justify-content-between align-items-center">
-          <button
-            type="button"
-            class="btn btn-success"
-            :disabled="controlsDisabled"
-            @click="store.playPause"
-          >
-            {{ store.isPlaying ? 'Pause' : 'Play' }}
-          </button>
-          <strong class="fs-5">{{ formattedTime }}</strong>
-        </div>
-
-        <input
-          v-model.number="seekPercent"
-          class="form-range"
-          type="range"
-          min="0"
-          max="100"
-          step="0.1"
-          :disabled="controlsDisabled"
-        />
-
-        <div class="small text-body-secondary">
-          <strong>Shortcuts:</strong>
-          <code>Space</code> play/pause,
-          <code>A</code>/<code>B</code> loop edges,
-          <code>L</code> loop on/off,
-          <code>M</code> marker,
-          arrows seek/marker jump.
-        </div>
-      </div>
-    </section>
-
-    <section class="row g-3 mb-3">
-      <div class="col-lg-6">
-        <div class="card shadow-sm border-0 h-100">
+        <section class="card shadow-sm border-0 mb-3">
           <div class="card-body">
-            <h2 class="section-title">Tempo, Pitch, Volume</h2>
+            <WaveformPane />
+          </div>
+        </section>
 
-            <label class="form-label d-flex justify-content-between">
-              <span>Tempo</span>
-              <strong>{{ store.tempo.toFixed(2) }}x</strong>
-            </label>
-            <input
-              :value="store.tempo"
-              class="form-range mb-3"
-              type="range"
-              :min="MIN_TEMPO"
-              :max="MAX_TEMPO"
-              step="0.01"
-              :disabled="controlsDisabled"
-              @input="store.setTempo(Number(($event.target as HTMLInputElement).value))"
-            />
+        <section class="card shadow-sm border-0 mb-3">
+          <div class="card-body d-flex flex-column gap-3">
+            <div class="d-flex justify-content-between align-items-center">
+              <button
+                type="button"
+                class="btn btn-success"
+                :disabled="controlsDisabled"
+                @click="store.playPause"
+              >
+                {{ store.isPlaying ? 'Pause' : 'Play' }}
+              </button>
+              <strong class="fs-5">{{ formattedTime }}</strong>
+            </div>
 
-            <label class="form-label d-flex justify-content-between">
-              <span>Pitch</span>
-              <strong>{{ store.pitchSemitones.toFixed(1) }} st</strong>
-            </label>
             <input
-              :value="store.pitchSemitones"
-              class="form-range mb-3"
-              type="range"
-              :min="MIN_PITCH"
-              :max="MAX_PITCH"
-              step="0.1"
-              :disabled="controlsDisabled"
-              @input="store.setPitchSemitones(Number(($event.target as HTMLInputElement).value))"
-            />
-
-            <label class="form-label d-flex justify-content-between">
-              <span>Volume</span>
-              <strong>{{ store.volume.toFixed(2) }}</strong>
-            </label>
-            <input
-              :value="store.volume"
-              class="form-range mb-0"
+              v-model.number="seekPercent"
+              class="form-range"
               type="range"
               min="0"
-              max="2"
-              step="0.01"
+              max="100"
+              step="0.1"
               :disabled="controlsDisabled"
-              @input="store.setVolume(Number(($event.target as HTMLInputElement).value))"
             />
-          </div>
-        </div>
-      </div>
-
-      <div class="col-lg-6">
-        <div class="card shadow-sm border-0 h-100">
-          <div class="card-body d-flex flex-column gap-3">
-            <h2 class="section-title">Loop Controls</h2>
-
-            <div class="d-flex flex-wrap gap-2">
-              <button
-                type="button"
-                class="btn btn-primary"
-                :disabled="controlsDisabled"
-                @click="store.addLoopSection"
-              >
-                Add Section
-              </button>
-              <button
-                type="button"
-                class="btn btn-warning"
-                :disabled="controlsDisabled || !activeLoopSection"
-                @click="store.setLoopEnabled(!store.loop.enabled)"
-              >
-                {{ store.loop.enabled ? 'Disable Active Loop' : 'Enable Active Loop' }}
-              </button>
-              <button
-                type="button"
-                class="btn btn-secondary"
-                :disabled="controlsDisabled || !activeLoopSection"
-                @click="store.clearActiveLoopSection"
-              >
-                Clear Active
-              </button>
-              <div class="ms-auto d-flex align-items-center gap-2">
-                <label class="form-label mb-0">Mode</label>
-                <select
-                  class="form-select form-select-sm"
-                  :value="store.loop.mode"
-                  :disabled="controlsDisabled || !activeLoopSection"
-                  @change="store.setLoopMode(($event.target as HTMLSelectElement).value as 'forever' | 'once')"
-                >
-                  <option value="forever">Loop Forever</option>
-                  <option value="once">Loop Once</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="table-responsive">
-              <table class="table table-sm align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th scope="col" style="width: 44px">#</th>
-                    <th scope="col" style="width: 24%">Name</th>
-                    <th scope="col" style="width: 96px">Start</th>
-                    <th scope="col" style="width: 96px">End</th>
-                    <th scope="col" style="width: 150px">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-if="store.loopSections.length === 0">
-                    <td colspan="5" class="text-body-secondary">
-                      No loop sections yet. Add one to define loopable regions.
-                    </td>
-                  </tr>
-                  <tr
-                    v-for="(section, index) in store.loopSections"
-                    :key="section.id"
-                    :class="{ 'table-active': section.id === store.activeLoopSectionId }"
-                  >
-                    <td>{{ index + 1 }}</td>
-                    <td>
-                      <input
-                        :value="section.name"
-                        class="form-control form-control-sm"
-                        type="text"
-                        :disabled="controlsDisabled"
-                        @change="store.renameLoopSection(section.id, ($event.target as HTMLInputElement).value)"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        :value="section.startSec.toFixed(2)"
-                        class="form-control form-control-sm"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        :disabled="controlsDisabled"
-                        @change="onLoopSectionStartInput(section.id, ($event.target as HTMLInputElement).value)"
-                      />
-                    </td>
-                    <td>
-                      <input
-                        :value="section.endSec.toFixed(2)"
-                        class="form-control form-control-sm"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        :disabled="controlsDisabled"
-                        @change="onLoopSectionEndInput(section.id, ($event.target as HTMLInputElement).value)"
-                      />
-                    </td>
-                    <td class="d-flex gap-1">
-                      <button
-                        type="button"
-                        class="btn btn-sm btn-light"
-                        :disabled="controlsDisabled"
-                        @click="store.selectLoopSection(section.id)"
-                      >
-                        Jump
-                      </button>
-                      <button
-                        type="button"
-                        class="btn btn-sm btn-danger"
-                        :disabled="controlsDisabled"
-                        @click="store.removeLoopSection(section.id)"
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
 
             <div class="small text-body-secondary">
-              <span v-if="activeLoopSection">
-                Active: <strong>{{ activeLoopSection.name }}</strong>
-                ({{ activeLoopSection.startSec.toFixed(2) }}s - {{ activeLoopSection.endSec.toFixed(2) }}s)
-              </span>
-              <span v-else>No active section selected.</span>
+              <strong>Shortcuts:</strong>
+              <code>Space</code> play/pause,
+              <code>A</code>/<code>B</code> loop edges,
+              <code>L</code> loop on/off,
+              <code>M</code> marker,
+              arrows seek/marker jump.
             </div>
           </div>
-        </div>
-      </div>
-    </section>
+        </section>
 
-    <section class="card shadow-sm border-0 mb-3">
-      <div class="card-body">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-          <h2 class="section-title mb-0">Markers</h2>
-          <button
-            type="button"
-            class="btn btn-warning btn-sm"
-            :disabled="controlsDisabled"
-            @click="store.addMarker()"
-          >
-            Add Marker
-          </button>
-        </div>
-        <ul class="list-group marker-list">
-          <li
-            v-for="marker in store.markers"
-            :key="marker.id"
-            class="list-group-item d-flex align-items-center gap-2"
-            :class="{ active: marker.id === store.activeMarkerId }"
-          >
-            <button
-              type="button"
-              class="btn btn-sm btn-primary"
-              :disabled="controlsDisabled"
-              @click="store.jumpToMarker(marker.id)"
-            >
-              {{ marker.timeSec.toFixed(2) }}s
-            </button>
-            <input
-              :value="marker.label"
-              class="form-control form-control-sm"
-              type="text"
-              :disabled="controlsDisabled"
-              @change="store.renameMarker(marker.id, ($event.target as HTMLInputElement).value)"
-            />
-            <button
-              type="button"
-              class="btn btn-sm btn-danger"
-              :disabled="controlsDisabled"
-              @click="store.removeMarker(marker.id)"
-            >
-              Delete
-            </button>
-          </li>
-        </ul>
-      </div>
-    </section>
+        <section class="row g-3 mb-3">
+          <div class="col-lg-6">
+            <div class="card shadow-sm border-0 h-100">
+              <div class="card-body">
+                <h2 class="section-title">Tempo, Pitch, Volume</h2>
+
+                <label class="form-label d-flex justify-content-between">
+                  <span>Tempo</span>
+                  <strong>{{ store.tempo.toFixed(2) }}x</strong>
+                </label>
+                <input
+                  :value="store.tempo"
+                  class="form-range mb-3"
+                  type="range"
+                  :min="MIN_TEMPO"
+                  :max="MAX_TEMPO"
+                  step="0.01"
+                  :disabled="controlsDisabled"
+                  @input="store.setTempo(Number(($event.target as HTMLInputElement).value))"
+                />
+
+                <label class="form-label d-flex justify-content-between">
+                  <span>Pitch</span>
+                  <strong>{{ store.pitchSemitones.toFixed(1) }} st</strong>
+                </label>
+                <input
+                  :value="store.pitchSemitones"
+                  class="form-range mb-3"
+                  type="range"
+                  :min="MIN_PITCH"
+                  :max="MAX_PITCH"
+                  step="0.1"
+                  :disabled="controlsDisabled"
+                  @input="store.setPitchSemitones(Number(($event.target as HTMLInputElement).value))"
+                />
+
+                <label class="form-label d-flex justify-content-between">
+                  <span>Volume</span>
+                  <strong>{{ store.volume.toFixed(2) }}</strong>
+                </label>
+                <input
+                  :value="store.volume"
+                  class="form-range mb-0"
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.01"
+                  :disabled="controlsDisabled"
+                  @input="store.setVolume(Number(($event.target as HTMLInputElement).value))"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-6">
+            <div class="card shadow-sm border-0 h-100">
+              <div class="card-body d-flex flex-column gap-3">
+                <h2 class="section-title">Loop Controls</h2>
+
+                <div class="loop-controls-toolbar d-flex flex-wrap align-items-center gap-2">
+                  <div class="d-flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      class="btn btn-primary"
+                      :disabled="controlsDisabled"
+                      @click="store.addLoopSection"
+                    >
+                      Add Section
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-warning"
+                      :disabled="controlsDisabled || !activeLoopSection"
+                      @click="store.setLoopEnabled(!store.loop.enabled)"
+                    >
+                      {{ store.loop.enabled ? 'Disable Active Loop' : 'Enable Active Loop' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-secondary"
+                      :disabled="controlsDisabled || !activeLoopSection"
+                      @click="store.clearActiveLoopSection"
+                    >
+                      Clear Active
+                    </button>
+                  </div>
+                  <div class="loop-mode-group d-flex align-items-center gap-2">
+                    <label class="form-label mb-0">Mode</label>
+                    <select
+                      class="loop-mode-select form-select form-select-sm"
+                      :value="store.loop.mode"
+                      :disabled="controlsDisabled || !activeLoopSection"
+                      @change="store.setLoopMode(($event.target as HTMLSelectElement).value as 'forever' | 'once')"
+                    >
+                      <option value="forever">Loop Forever</option>
+                      <option value="once">Loop Once</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th scope="col" style="width: 44px">#</th>
+                        <th scope="col" style="width: 24%">Name</th>
+                        <th scope="col" style="width: 96px">Start</th>
+                        <th scope="col" style="width: 96px">End</th>
+                        <th scope="col" style="width: 150px">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-if="store.loopSections.length === 0">
+                        <td colspan="5" class="text-body-secondary">
+                          No loop sections yet. Add one to define loopable regions.
+                        </td>
+                      </tr>
+                      <tr
+                        v-for="(section, index) in store.loopSections"
+                        :key="section.id"
+                        :class="{ 'table-active': section.id === store.activeLoopSectionId }"
+                      >
+                        <td>{{ index + 1 }}</td>
+                        <td>
+                          <input
+                            :value="section.name"
+                            class="form-control form-control-sm"
+                            type="text"
+                            :disabled="controlsDisabled"
+                            @change="store.renameLoopSection(section.id, ($event.target as HTMLInputElement).value)"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            :value="section.startSec.toFixed(2)"
+                            class="form-control form-control-sm"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            :disabled="controlsDisabled"
+                            @change="onLoopSectionStartInput(section.id, ($event.target as HTMLInputElement).value)"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            :value="section.endSec.toFixed(2)"
+                            class="form-control form-control-sm"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            :disabled="controlsDisabled"
+                            @change="onLoopSectionEndInput(section.id, ($event.target as HTMLInputElement).value)"
+                          />
+                        </td>
+                        <td class="d-flex gap-1">
+                          <button
+                            type="button"
+                            class="btn btn-sm btn-light"
+                            :disabled="controlsDisabled"
+                            @click="store.selectLoopSection(section.id)"
+                          >
+                            Jump
+                          </button>
+                          <button
+                            type="button"
+                            class="btn btn-sm btn-danger"
+                            :disabled="controlsDisabled"
+                            @click="store.removeLoopSection(section.id)"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div class="small text-body-secondary">
+                  <span v-if="activeLoopSection">
+                    Active: <strong>{{ activeLoopSection.name }}</strong>
+                    ({{ activeLoopSection.startSec.toFixed(2) }}s - {{ activeLoopSection.endSec.toFixed(2) }}s)
+                  </span>
+                  <span v-else>No active section selected.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card shadow-sm border-0 mb-3">
+          <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+              <h2 class="section-title mb-0">Markers</h2>
+              <button
+                type="button"
+                class="btn btn-warning btn-sm"
+                :disabled="controlsDisabled"
+                @click="store.addMarker()"
+              >
+                Add Marker
+              </button>
+            </div>
+            <ul class="list-group marker-list">
+              <li
+                v-for="marker in store.markers"
+                :key="marker.id"
+                class="list-group-item d-flex align-items-center gap-2"
+                :class="{ active: marker.id === store.activeMarkerId }"
+              >
+                <button
+                  type="button"
+                  class="btn btn-sm btn-primary"
+                  :disabled="controlsDisabled"
+                  @click="store.jumpToMarker(marker.id)"
+                >
+                  {{ marker.timeSec.toFixed(2) }}s
+                </button>
+                <input
+                  :value="marker.label"
+                  class="form-control form-control-sm"
+                  type="text"
+                  :disabled="controlsDisabled"
+                  @change="store.renameMarker(marker.id, ($event.target as HTMLInputElement).value)"
+                />
+                <button
+                  type="button"
+                  class="btn btn-sm btn-danger"
+                  :disabled="controlsDisabled"
+                  @click="store.removeMarker(marker.id)"
+                >
+                  Delete
+                </button>
+              </li>
+            </ul>
+          </div>
+        </section>
+      </section>
+    </div>
+
+    <input
+      ref="fallbackFolderInput"
+      class="d-none"
+      type="file"
+      accept="audio/*,video/*"
+      webkitdirectory
+      directory
+      multiple
+      @change="onFallbackFolderChanged"
+    />
   </main>
 </template>
