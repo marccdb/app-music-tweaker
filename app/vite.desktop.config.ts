@@ -1,19 +1,35 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import electron from 'vite-plugin-electron/simple'
+import electron from 'vite-plugin-electron'
 import { contentSecurityPolicyPlugin } from './vite.csp'
 
 export default defineConfig({
   plugins: [
     contentSecurityPolicyPlugin(),
     vue(),
-    electron({
-      main: {
+    electron([
+      {
         entry: 'electron/main.ts',
       },
-      preload: {
-        input: 'electron/preload.ts',
+      {
+        onstart({ reload }) {
+          reload()
+        },
+        vite: {
+          build: {
+            codeSplitting: false,
+            rollupOptions: {
+              input: 'electron/preload.ts',
+              output: {
+                format: 'cjs',
+                entryFileNames: '[name].mjs',
+                chunkFileNames: '[name].mjs',
+                assetFileNames: '[name].[ext]',
+              },
+            },
+          },
+        },
       },
-    }),
+    ]),
   ],
 })

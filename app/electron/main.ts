@@ -98,6 +98,7 @@ const APP_INDEX_URL = `${APP_PROTOCOL}://${APP_PROTOCOL_HOST}/index.html`
 const MAX_FOLDER_ID_LENGTH = 128
 const MAX_RELATIVE_PATH_LENGTH = 4096
 const SCAN_YIELD_INTERVAL = 200
+const ALLOWLIST_FILE_NAME = 'folder-allowlist.v1.json'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -124,8 +125,14 @@ type CachedFolder = {
 }
 
 const folderIdByRootPath = new Map<string, string>()
+const rootPathByFolderId = new Map<string, string>()
 const folderCacheById = new Map<string, CachedFolder>()
 let folderIdCounter = 1
+
+type PersistedAllowlist = {
+  version: 1
+  folders: Array<{ folderId: string; rootPath: string }>
+}
 
 function ok<T>(data: T): Result<T> {
   return { ok: true, data }
@@ -255,11 +262,81 @@ function isSupportedMediaPath(absolutePath: string): boolean {
   return SUPPORTED_MEDIA_EXTENSIONS.has(path.extname(absolutePath).toLowerCase())
 }
 
+function allowlistFilePath(): string {
+  return path.join(app.getPath('userData'), ALLOWLIST_FILE_NAME)
+}
+
+function syncFolderIdCounter(): void {
+  let nextCounter = 1
+  for (const folderId of rootPathByFolderId.keys()) {
+    const match = /^folder_(\d+)$/.exec(folderId)
+    if (!match) continue
+    const numeric = Number.parseInt(match[1], 10)
+    if (!Number.isFinite(numeric)) continue
+    nextCounter = Math.max(nextCounter, numeric + 1)
+  }
+  folderIdCounter = nextCounter
+}
+
+async function loadPersistedAllowlist(): Promise<void> {
+  const filePath = allowlistFilePath()
+  try {
+    const content = await fs.readFile(filePath, 'utf-8')
+    const parsed = JSON.parse(content) as Partial<PersistedAllowlist>
+    if (parsed.version !== 1 || !Array.isArray(parsed.folders)) {
+      return
+    }
+
+    for (const folder of parsed.folders) {
+      if (!folder || typeof folder.folderId !== 'string' || typeof folder.rootPath !== 'string') {
+        continue
+      }
+      const folderId = folder.folderId.trim()
+      const rootPath = folder.rootPath.trim()
+      if (!folderId || !rootPath) continue
+      if (folderId.length > MAX_FOLDER_ID_LENGTH || folderId.includes('\0') || rootPath.includes('\0')) {
+        continue
+      }
+
+      const normalizedRoot = normalizeAbsolutePath(rootPath)
+      folderIdByRootPath.set(normalizedRoot, folderId)
+      rootPathByFolderId.set(folderId, normalizedRoot)
+    }
+
+    syncFolderIdCounter()
+  } catch (cause) {
+    const isFileMissing = cause instanceof Error && 'code' in cause && cause.code === 'ENOENT'
+    if (!isFileMissing) {
+      console.warn('Failed to load persisted folder allowlist.', cause)
+    }
+  }
+}
+
+async function savePersistedAllowlist(): Promise<void> {
+  const filePath = allowlistFilePath()
+  const payload: PersistedAllowlist = {
+    version: 1,
+    folders: Array.from(rootPathByFolderId.entries()).map(([folderId, rootPath]) => ({ folderId, rootPath })),
+  }
+  payload.folders.sort((a, b) => a.folderId.localeCompare(b.folderId))
+
+  await fs.mkdir(path.dirname(filePath), { recursive: true })
+  await fs.writeFile(filePath, JSON.stringify(payload), 'utf-8')
+}
+
 function buildFolderId(rootPath: string): string {
   const existing = folderIdByRootPath.get(rootPath)
   if (existing) return existing
-  const folderId = `folder_${folderIdCounter++}`
+
+  let folderId = `folder_${folderIdCounter}`
+  while (rootPathByFolderId.has(folderId)) {
+    folderIdCounter += 1
+    folderId = `folder_${folderIdCounter}`
+  }
+  folderIdCounter += 1
+
   folderIdByRootPath.set(rootPath, folderId)
+  rootPathByFolderId.set(folderId, rootPath)
   return folderId
 }
 
@@ -366,6 +443,11 @@ function registerIpcHandlers(): void {
     try {
       const scanned = await scanFolder(folderPath)
       folderCacheById.set(scanned.folderId, scanned)
+      try {
+        await savePersistedAllowlist()
+      } catch (persistCause) {
+        console.warn('Failed to persist folder allowlist.', persistCause)
+      }
       return ok({
         folderId: scanned.folderId,
         folderName: path.basename(scanned.rootPath),
@@ -384,9 +466,24 @@ function registerIpcHandlers(): void {
       if (senderError) return senderError
 
       const folderId = readStringField(payload, 'folderId', MAX_FOLDER_ID_LENGTH) ?? ''
-      const existing = folderCacheById.get(folderId)
-      if (!folderId || !existing) {
+      if (!folderId) {
         return err('FOLDER_FORBIDDEN', 'Folder id is not in allowlist.')
+      }
+
+      let existing = folderCacheById.get(folderId)
+      if (!existing) {
+        const rootPath = rootPathByFolderId.get(folderId)
+        if (!rootPath) {
+          return err('FOLDER_FORBIDDEN', 'Folder id is not in allowlist.')
+        }
+        try {
+          const hydrated = await scanFolder(rootPath)
+          existing = { ...hydrated, folderId }
+          folderCacheById.set(folderId, existing)
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : 'Failed to refresh folder.'
+          return err('SCAN_FAILED', message)
+        }
       }
 
       try {
@@ -412,7 +509,21 @@ function registerIpcHandlers(): void {
 
     const folderId = readStringField(payload, 'folderId', MAX_FOLDER_ID_LENGTH) ?? ''
     const relativePath = readStringField(payload, 'relativePath', MAX_RELATIVE_PATH_LENGTH) ?? ''
-    const existing = folderCacheById.get(folderId)
+    let existing = folderCacheById.get(folderId)
+    if (!existing && folderId) {
+      const rootPath = rootPathByFolderId.get(folderId)
+      if (rootPath) {
+        try {
+          const hydrated = await scanFolder(rootPath)
+          existing = { ...hydrated, folderId }
+          folderCacheById.set(folderId, existing)
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : 'Failed to refresh folder.'
+          return err('SCAN_FAILED', message)
+        }
+      }
+    }
+
     if (!existing) {
       return err('TRACK_FORBIDDEN', 'Folder id is not in allowlist.')
     }
@@ -445,6 +556,7 @@ function registerIpcHandlers(): void {
 }
 
 app.whenReady().then(async () => {
+  await loadPersistedAllowlist()
   registerAppProtocol()
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   registerIpcHandlers()

@@ -177,21 +177,33 @@ onBeforeUnmount(() => {
     <div class="workspace-grid">
       <aside class="card shadow-sm border-0 library-sidebar">
         <div class="card-body p-0 d-flex flex-column h-100">
-          <header class="px-3 py-3 border-bottom d-flex justify-content-between align-items-center gap-2">
-            <div>
-              <h2 class="section-title mb-1">Library</h2>
-              <small class="text-body-secondary" :title="store.folderName || 'No folder connected'">
-                {{ store.folderName || 'No folder connected' }}
-              </small>
+          <header class="px-3 py-3 border-bottom">
+            <div class="d-flex gap-2 mb-3">
+              <button type="button" class="btn btn-primary flex-fill" :disabled="store.isScanning" @click="onImportFolderClick">
+                Import Folder
+              </button>
+              <label class="btn btn-primary flex-fill d-flex align-items-center justify-content-center mb-0">
+                Import Audio
+                <input class="d-none" type="file" accept="audio/*,video/*" @change="onFileChanged" />
+              </label>
             </div>
-            <button
-              type="button"
-              class="btn btn-sm btn-outline-secondary"
-              :disabled="!canRefreshFolder"
-              @click="onRefreshFolderClick"
-            >
-              Refresh
-            </button>
+
+            <div class="d-flex justify-content-between align-items-center gap-2">
+              <div>
+                <h2 class="section-title mb-1">Library</h2>
+                <small class="text-body-secondary" :title="store.folderName || 'No folder connected'">
+                  {{ store.folderName || 'No folder connected' }}
+                </small>
+              </div>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                :disabled="!canRefreshFolder"
+                @click="onRefreshFolderClick"
+              >
+                Refresh
+              </button>
+            </div>
           </header>
 
           <div class="library-track-list flex-grow-1">
@@ -218,11 +230,8 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <div class="sidebar-footer p-3 border-top">
-            <button type="button" class="btn btn-primary w-100" :disabled="store.isScanning" @click="onImportFolderClick">
-              Import Folder
-            </button>
-            <small class="text-body-secondary d-block mt-2" v-if="!store.folderConnected && store.tracks.length > 0">
+          <div class="sidebar-footer p-3 border-top" v-if="!store.folderConnected && store.tracks.length > 0">
+            <small class="text-body-secondary d-block">
               Reconnect folder to load tracks.
             </small>
           </div>
@@ -244,11 +253,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
 
-            <div class="d-flex flex-wrap align-items-center gap-2">
-              <label class="btn btn-primary">
-                Import Audio
-                <input class="d-none" type="file" accept="audio/*,video/*" @change="onFileChanged" />
-              </label>
+            <div class="d-flex flex-wrap align-items-center gap-2" v-if="store.trackName || store.isImporting || !hasDesktopApi">
               <span class="badge text-bg-secondary" v-if="store.trackName">{{ store.trackName }}</span>
               <span class="badge text-bg-info" v-if="store.isImporting">Loading waveform...</span>
               <span class="badge text-bg-warning" v-if="!hasDesktopApi">Folder picker fallback mode</span>

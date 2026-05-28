@@ -45,7 +45,7 @@ var d = {
 	".weba": "audio/webm",
 	".webm": "video/webm",
 	".wma": "audio/x-ms-wma"
-}, m = l(import.meta.url), h = c.dirname(m), g = c.join(h, "../dist"), _ = "tuneforge", v = "app", y = `${_}://${v}/index.html`, b = 128, x = 4096, S = 200;
+}, m = l(import.meta.url), h = c.dirname(m), g = c.join(h, "../dist"), _ = "tuneforge", v = "app", y = `${_}://${v}/index.html`, b = 128, x = 4096, S = 200, C = "folder-allowlist.v1.json";
 a.registerSchemesAsPrivileged([{
 	scheme: _,
 	privileges: {
@@ -55,45 +55,45 @@ a.registerSchemesAsPrivileged([{
 		stream: !0
 	}
 }]);
-var C = /* @__PURE__ */ new Map(), w = /* @__PURE__ */ new Map(), T = 1;
-function E(e) {
+var w = /* @__PURE__ */ new Map(), T = /* @__PURE__ */ new Map(), E = /* @__PURE__ */ new Map(), D = 1;
+function O(e) {
 	return {
 		ok: !0,
 		data: e
 	};
 }
-function D(e, t) {
+function k(e, t) {
 	return {
 		ok: !1,
 		code: e,
 		message: t
 	};
 }
-function O(e) {
+function A(e) {
 	return typeof e == "object" && !!e && !Array.isArray(e);
 }
-function k(e) {
+function j(e) {
 	return c.resolve(e);
 }
-function A(e, t) {
+function M(e, t) {
 	return c.relative(e, t).split(c.sep).join("/");
 }
-function j(e, t) {
+function N(e, t) {
 	let n = c.relative(e, t);
 	return n === "" || !n.startsWith("..") && !c.isAbsolute(n);
 }
-function M(e) {
+function P(e) {
 	return e.byteOffset === 0 && e.byteLength === e.buffer.byteLength ? e.buffer : e.buffer.slice(e.byteOffset, e.byteOffset + e.byteLength);
 }
-function N(e, t, n) {
-	if (!O(e)) return null;
+function F(e, t, n) {
+	if (!A(e)) return null;
 	let r = e[t];
 	return typeof r != "string" || r.length === 0 || r.length > n || r.includes("\0") ? null : r;
 }
-function P(e) {
+function I(e) {
 	return c.isAbsolute(e) || e.startsWith("/") || e.startsWith("\\") ? !1 : e.replace(/\\/g, "/").split("/").every((e) => e !== "" && e !== "." && e !== "..");
 }
-function F(e) {
+function L(e) {
 	try {
 		let t = new URL(e);
 		if (t.protocol === `${_}:`) return t.hostname === v;
@@ -105,22 +105,22 @@ function F(e) {
 		return !1;
 	}
 }
-function I(e) {
-	return F(e.senderFrame?.url || e.sender.getURL()) ? null : D("IPC_SENDER_FORBIDDEN", "IPC sender is not trusted.");
+function R(e) {
+	return L(e.senderFrame?.url || e.sender.getURL()) ? null : k("IPC_SENDER_FORBIDDEN", "IPC sender is not trusted.");
 }
-function L(e) {
+function z(e) {
 	try {
 		let t = new URL(e);
 		if (t.protocol !== `${_}:` || t.hostname !== v) return null;
-		let n = decodeURIComponent(t.pathname === "/" ? "/index.html" : t.pathname).slice(1), r = k(c.join(g, n));
-		return j(g, r) ? r : null;
+		let n = decodeURIComponent(t.pathname === "/" ? "/index.html" : t.pathname).slice(1), r = j(c.join(g, n));
+		return N(g, r) ? r : null;
 	} catch {
 		return null;
 	}
 }
-function R() {
+function B() {
 	a.handle(_, async (e) => {
-		let t = L(e.url);
+		let t = z(e.url);
 		if (!t) return new Response("Not found", { status: 404 });
 		try {
 			return (await s.stat(t)).isFile() ? i.fetch(u(t).toString()) : new Response("Not found", { status: 404 });
@@ -129,40 +129,81 @@ function R() {
 		}
 	});
 }
-function z(e) {
+function V(e) {
 	let t = (e, t) => {
-		F(t) || e.preventDefault();
+		L(t) || e.preventDefault();
 	};
 	e.webContents.on("will-navigate", t), e.webContents.on("will-redirect", t), e.webContents.on("will-attach-webview", (e) => e.preventDefault()), e.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 }
-async function B() {
+async function H() {
 	await new Promise((e) => {
 		setImmediate(e);
 	});
 }
-function V(e) {
+function U(e) {
 	return f.has(c.extname(e).toLowerCase());
 }
-function H(e) {
-	let t = C.get(e);
-	if (t) return t;
-	let n = `folder_${T++}`;
-	return C.set(e, n), n;
+function W() {
+	return c.join(t.getPath("userData"), C);
 }
-async function U(e) {
-	let t = [], n = /* @__PURE__ */ new Map(), r = k(e), i = H(r), a = 0;
+function G() {
+	let e = 1;
+	for (let t of T.keys()) {
+		let n = /^folder_(\d+)$/.exec(t);
+		if (!n) continue;
+		let r = Number.parseInt(n[1], 10);
+		Number.isFinite(r) && (e = Math.max(e, r + 1));
+	}
+	D = e;
+}
+async function K() {
+	let e = W();
+	try {
+		let t = await s.readFile(e, "utf-8"), n = JSON.parse(t);
+		if (n.version !== 1 || !Array.isArray(n.folders)) return;
+		for (let e of n.folders) {
+			if (!e || typeof e.folderId != "string" || typeof e.rootPath != "string") continue;
+			let t = e.folderId.trim(), n = e.rootPath.trim();
+			if (!t || !n || t.length > b || t.includes("\0") || n.includes("\0")) continue;
+			let r = j(n);
+			w.set(r, t), T.set(t, r);
+		}
+		G();
+	} catch (e) {
+		e instanceof Error && "code" in e && e.code === "ENOENT" || console.warn("Failed to load persisted folder allowlist.", e);
+	}
+}
+async function q() {
+	let e = W(), t = {
+		version: 1,
+		folders: Array.from(T.entries()).map(([e, t]) => ({
+			folderId: e,
+			rootPath: t
+		}))
+	};
+	t.folders.sort((e, t) => e.folderId.localeCompare(t.folderId)), await s.mkdir(c.dirname(e), { recursive: !0 }), await s.writeFile(e, JSON.stringify(t), "utf-8");
+}
+function J(e) {
+	let t = w.get(e);
+	if (t) return t;
+	let n = `folder_${D}`;
+	for (; T.has(n);) D += 1, n = `folder_${D}`;
+	return D += 1, w.set(e, n), T.set(n, e), n;
+}
+async function Y(e) {
+	let t = [], n = /* @__PURE__ */ new Map(), r = j(e), i = J(r), a = 0;
 	async function o(e) {
 		let i = await s.readdir(e, { withFileTypes: !0 });
 		for (let l of i) {
-			a += 1, a % S === 0 && await B();
+			a += 1, a % S === 0 && await H();
 			let i = c.join(e, l.name);
 			if (l.isSymbolicLink()) continue;
 			if (l.isDirectory()) {
 				await o(i);
 				continue;
 			}
-			if (!l.isFile() || !V(i)) continue;
-			let u = await s.stat(i), d = A(r, i), f = `${d}:${u.size}:${Math.trunc(u.mtimeMs)}`, p = {
+			if (!l.isFile() || !U(i)) continue;
+			let u = await s.stat(i), d = M(r, i), f = `${d}:${u.size}:${Math.trunc(u.mtimeMs)}`, p = {
 				id: f,
 				name: l.name,
 				relativePath: d,
@@ -183,7 +224,7 @@ async function U(e) {
 		byRelativePath: n
 	};
 }
-async function W() {
+async function X() {
 	let t = new e({
 		width: 1400,
 		height: 920,
@@ -195,71 +236,101 @@ async function W() {
 			sandbox: !0
 		}
 	});
-	z(t), t.once("ready-to-show", () => {
+	V(t), t.once("ready-to-show", () => {
 		t.show();
 	});
 	let n = process.env.VITE_DEV_SERVER_URL;
 	return n ? await t.loadURL(n) : await t.loadURL(y), t;
 }
-function G() {
+function Z() {
 	r.handle(d.pickFolder, async (t) => {
-		let r = I(t);
+		let r = R(t);
 		if (r) return r;
 		let i = e.getFocusedWindow(), a = {
 			title: "Select music folder",
 			properties: ["openDirectory", "dontAddToRecent"]
 		}, o = i ? await n.showOpenDialog(i, a) : await n.showOpenDialog(a);
-		if (o.canceled || o.filePaths.length === 0) return D("PICKER_CANCELLED", "Folder selection cancelled.");
-		let s = k(o.filePaths[0]);
+		if (o.canceled || o.filePaths.length === 0) return k("PICKER_CANCELLED", "Folder selection cancelled.");
+		let s = j(o.filePaths[0]);
 		try {
-			let e = await U(s);
-			return w.set(e.folderId, e), E({
+			let e = await Y(s);
+			E.set(e.folderId, e);
+			try {
+				await q();
+			} catch (e) {
+				console.warn("Failed to persist folder allowlist.", e);
+			}
+			return O({
 				folderId: e.folderId,
 				folderName: c.basename(e.rootPath),
 				tracks: e.tracks
 			});
 		} catch (e) {
-			return D("SCAN_FAILED", e instanceof Error ? e.message : "Failed to scan folder.");
+			return k("SCAN_FAILED", e instanceof Error ? e.message : "Failed to scan folder.");
 		}
 	}), r.handle(d.refreshFolder, async (e, t) => {
-		let n = I(e);
+		let n = R(e);
 		if (n) return n;
-		let r = N(t, "folderId", b) ?? "", i = w.get(r);
-		if (!r || !i) return D("FOLDER_FORBIDDEN", "Folder id is not in allowlist.");
+		let r = F(t, "folderId", b) ?? "";
+		if (!r) return k("FOLDER_FORBIDDEN", "Folder id is not in allowlist.");
+		let i = E.get(r);
+		if (!i) {
+			let e = T.get(r);
+			if (!e) return k("FOLDER_FORBIDDEN", "Folder id is not in allowlist.");
+			try {
+				i = {
+					...await Y(e),
+					folderId: r
+				}, E.set(r, i);
+			} catch (e) {
+				return k("SCAN_FAILED", e instanceof Error ? e.message : "Failed to refresh folder.");
+			}
+		}
 		try {
 			let e = {
-				...await U(i.rootPath),
+				...await Y(i.rootPath),
 				folderId: i.folderId
 			};
-			return w.set(r, e), E({ tracks: e.tracks });
+			return E.set(r, e), O({ tracks: e.tracks });
 		} catch (e) {
-			return D("SCAN_FAILED", e instanceof Error ? e.message : "Failed to refresh folder.");
+			return k("SCAN_FAILED", e instanceof Error ? e.message : "Failed to refresh folder.");
 		}
 	}), r.handle(d.readTrack, async (e, t) => {
-		let n = I(e);
+		let n = R(e);
 		if (n) return n;
-		let r = N(t, "folderId", b) ?? "", i = N(t, "relativePath", x) ?? "", a = w.get(r);
-		if (!a) return D("TRACK_FORBIDDEN", "Folder id is not in allowlist.");
-		if (!P(i)) return D("TRACK_FORBIDDEN", "Track path is not valid.");
+		let r = F(t, "folderId", b) ?? "", i = F(t, "relativePath", x) ?? "", a = E.get(r);
+		if (!a && r) {
+			let e = T.get(r);
+			if (e) try {
+				a = {
+					...await Y(e),
+					folderId: r
+				}, E.set(r, a);
+			} catch (e) {
+				return k("SCAN_FAILED", e instanceof Error ? e.message : "Failed to refresh folder.");
+			}
+		}
+		if (!a) return k("TRACK_FORBIDDEN", "Folder id is not in allowlist.");
+		if (!I(i)) return k("TRACK_FORBIDDEN", "Track path is not valid.");
 		let o = a.byRelativePath.get(i);
-		if (!o || !j(a.rootPath, o.absolutePath)) return D("TRACK_FORBIDDEN", "Track path is not in allowlist.");
+		if (!o || !N(a.rootPath, o.absolutePath)) return k("TRACK_FORBIDDEN", "Track path is not in allowlist.");
 		try {
 			let [e, t] = await Promise.all([s.stat(o.absolutePath), s.readFile(o.absolutePath)]);
-			if (!e.isFile()) return D("TRACK_NOT_FILE", "Track path is not a file.");
+			if (!e.isFile()) return k("TRACK_NOT_FILE", "Track path is not a file.");
 			let n = c.extname(o.absolutePath).toLowerCase();
-			return E({
+			return O({
 				name: c.basename(o.absolutePath),
 				mimeType: p[n] ?? "application/octet-stream",
-				arrayBuffer: M(t)
+				arrayBuffer: P(t)
 			});
 		} catch (e) {
-			return D("READ_FAILED", e instanceof Error ? e.message : "Failed to read track.");
+			return k("READ_FAILED", e instanceof Error ? e.message : "Failed to read track.");
 		}
 	});
 }
 t.whenReady().then(async () => {
-	R(), o.defaultSession.setPermissionRequestHandler((e, t, n) => n(!1)), G(), await W(), t.on("activate", async () => {
-		e.getAllWindows().length === 0 && await W();
+	await K(), B(), o.defaultSession.setPermissionRequestHandler((e, t, n) => n(!1)), Z(), await X(), t.on("activate", async () => {
+		e.getAllWindows().length === 0 && await X();
 	});
 }), t.on("window-all-closed", () => {
 	process.platform !== "darwin" && t.quit();
