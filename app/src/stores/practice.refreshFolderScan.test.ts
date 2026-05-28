@@ -321,4 +321,68 @@ describe('practice store refreshFolderScan desktop flow', () => {
     expect(store.folderConnected).toBe(false)
     expect(store.scanError).toBe('Desktop API unavailable. Re-import folder.')
   })
+
+  it('restoreLastFolder keeps disconnected state when refresh fails after folder move', async () => {
+    const refreshFolder = vi.fn(async () => ({
+      ok: false as const,
+      code: 'SCAN_FAILED',
+      message: 'Folder moved or unavailable.',
+    }))
+    const readTrack = vi.fn()
+
+    mockLibrarySnapshot = {
+      folderName: 'Practice',
+      tracks: [{ ...makeDesktopTrack('song'), sourceType: 'desktop-directory' }],
+      activeTrackId: 'song',
+      sourceType: 'desktop-directory',
+      folderId: 'folder-1',
+      updatedAt: new Date(0).toISOString(),
+    }
+
+    window.desktopApi = {
+      pickFolder: vi.fn(),
+      refreshFolder,
+      readTrack,
+    }
+
+    const store = usePracticeStore()
+    await store.restoreLastFolder()
+
+    expect(refreshFolder).toHaveBeenCalledWith('folder-1')
+    expect(readTrack).not.toHaveBeenCalled()
+    expect(store.folderConnected).toBe(false)
+    expect(store.scanError).toBe('Folder moved or unavailable.')
+  })
+
+  it('selectTrack surfaces readTrack failure when folder becomes unavailable', async () => {
+    const pickFolder = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        folderId: 'folder-1',
+        folderName: 'Practice',
+        tracks: [makeDesktopTrack('song')],
+      },
+    }))
+    const refreshFolder = vi.fn(async () => ({
+      ok: true as const,
+      data: {
+        tracks: [makeDesktopTrack('song')],
+      },
+    }))
+    const readTrack = vi.fn(async () => ({
+      ok: false as const,
+      code: 'READ_FAILED',
+      message: 'File no longer available.',
+    }))
+
+    window.desktopApi = { pickFolder, refreshFolder, readTrack }
+
+    const store = usePracticeStore()
+    await store.importFolder()
+    await store.selectTrack('song')
+
+    expect(readTrack).toHaveBeenCalledWith('folder-1', 'song.mp3')
+    expect(store.folderConnected).toBe(false)
+    expect(store.scanError).toBe('File no longer available.')
+  })
 })

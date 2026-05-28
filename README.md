@@ -59,6 +59,9 @@ npm run build:desktop  # Build renderer + electron bundles
 npm run dist:desktop   # Package desktop app (AppImage/Snap on Linux)
 npm run test           # Unit tests
 npm run e2e            # Playwright e2e
+npm run licenses:check # Runtime license gate
+npm run licenses:notices # Regenerate notices file
+npm run qa:desktop     # Desktop QA smoke checks
 ```
 
 Important for direct Electron launch:
@@ -122,5 +125,8 @@ modaudio/
 
 Electron baseline already ported and active.
 Reference docs:
-- `features/electron-port.md`
-- `features/electron-port-report.md`
+- `documentation/electron-port.md`
+- `documentation/electron-port-report.md`
+- `documentation/license-compliance.md`
+- `documentation/desktop-qa.md`
+- `documentation/release-signing-notarization.md`

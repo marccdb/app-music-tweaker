@@ -17,11 +17,11 @@ export default defineConfig({
         },
         vite: {
           build: {
-            codeSplitting: false,
             rollupOptions: {
               input: 'electron/preload.ts',
               output: {
                 format: 'cjs',
+                inlineDynamicImports: true,
                 entryFileNames: '[name].mjs',
                 chunkFileNames: '[name].mjs',
                 assetFileNames: '[name].[ext]',

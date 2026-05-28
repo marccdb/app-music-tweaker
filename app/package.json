@@ -15,7 +15,12 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
-    "e2e:install": "playwright install chromium firefox webkit"
+    "e2e:install": "playwright install chromium firefox webkit",
+    "licenses:check": "node scripts/licenses.mjs check",
+    "licenses:notices": "node scripts/licenses.mjs notices",
+    "qa:package-smoke": "node scripts/package-smoke.mjs",
+    "qa:memory-long-file": "node --expose-gc scripts/memory-long-file-check.mjs",
+    "qa:desktop": "npm run qa:memory-long-file && npm run qa:package-smoke"
   },
   "dependencies": {
     "bootstrap": "^5.3.8",
