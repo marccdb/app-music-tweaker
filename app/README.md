@@ -27,4 +27,4 @@ Workflow: `.github/workflows/desktop-ci.yml`
 - license gate + notices drift check
 - long-file memory behavior smoke
 - packaging smoke on Linux/macOS/Windows
-- desktop build artifacts: Linux AppImage (`linux-appimage`), Windows NSIS `.exe` (`windows-x64`), macOS Apple Silicon `.dmg` (`macos-arm64`, runs on `macos-14`)
+- tag release publish (`v*` tags): Linux AppImage, Windows NSIS `.exe`, macOS Apple Silicon `.dmg` uploaded to GitHub Releases
