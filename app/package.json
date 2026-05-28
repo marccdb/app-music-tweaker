@@ -1,5 +1,5 @@
 {
-  "name": "Tune-Forge",
+  "name": "ModAudio",
   "private": true,
   "version": "0.1.0",
   "main": "dist-electron/main.js",
@@ -45,7 +45,7 @@
     "vue-tsc": "^3.3.2"
   },
   "build": {
-    "appId": "com.appmusictweaker.app",
+    "appId": "com.modaudio.app",
     "asar": true,
     "afterPack": "scripts/afterPack.cjs",
     "directories": {

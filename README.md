@@ -1,8 +1,8 @@
-# Tune-Forge
+# ModAudio
 
 Desktop-first music practice app for loop training.
 
-Tune-Forge loads local audio/video tracks, shows waveform, and gives practice controls for:
+ModAudio loads local audio/video tracks, shows waveform, and gives practice controls for:
 - tempo change (50% to 150%)
 - pitch shift (-12 to +12 semitones)
 - A/B loop definition and multi-loop sections
@@ -97,8 +97,8 @@ Result envelope:
 ## Persistence
 
 IndexedDB stores:
-- `anytune-practice-db/projects`: per-song practice projects
-- `anytune-library-db/library`: last imported library snapshot
+- `modaudio-practice-db/projects`: per-song practice projects
+- `modaudio-library-db/library`: last imported library snapshot
 
 Desktop folder permissions map persists in Electron userData:
 - `folder-allowlist.v1.json`
@@ -106,7 +106,7 @@ Desktop folder permissions map persists in Electron userData:
 ## Project Layout
 
 ```text
-tune-forge/
+modaudio/
   app/
     electron/                 # Main + preload
     src/

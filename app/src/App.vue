@@ -6,7 +6,7 @@ import { MIN_PITCH, MAX_PITCH, MIN_TEMPO, MAX_TEMPO } from './lib/math'
 
 const store = usePracticeStore()
 const theme = ref<'light' | 'dark'>('light')
-const THEME_KEY = 'tuneforge-theme'
+const THEME_KEY = 'modaudio-theme'
 
 const fallbackFolderInput = ref<HTMLInputElement | null>(null)
 
@@ -243,7 +243,7 @@ onBeforeUnmount(() => {
           <div class="card-body d-flex flex-column gap-3">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
               <div>
-                <h1 class="display-6 fw-bold mb-1">Tune-Forge</h1>
+                <h1 class="display-6 fw-bold mb-1">ModAudio</h1>
                 <p class="text-body-secondary mb-0">
                   Practice studio: tempo, pitch, A/B loops, markers, per-song local save.
                 </p>

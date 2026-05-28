@@ -45,7 +45,7 @@ var d = {
 	".weba": "audio/webm",
 	".webm": "video/webm",
 	".wma": "audio/x-ms-wma"
-}, m = l(import.meta.url), h = c.dirname(m), g = c.join(h, "../dist"), _ = "tuneforge", v = "app", y = `${_}://${v}/index.html`, b = 128, x = 4096, S = 200, C = "folder-allowlist.v1.json";
+}, m = l(import.meta.url), h = c.dirname(m), g = c.join(h, "../dist"), _ = "modaudio", v = "app", y = `${_}://${v}/index.html`, b = 128, x = 4096, S = 200, C = "folder-allowlist.v1.json";
 a.registerSchemesAsPrivileged([{
 	scheme: _,
 	privileges: {

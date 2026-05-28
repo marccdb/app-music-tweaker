@@ -32,7 +32,7 @@ const DEVELOPMENT_CSP = [
 
 export function contentSecurityPolicyPlugin(): Plugin {
   return {
-    name: 'tuneforge-content-security-policy',
+    name: 'modaudio-content-security-policy',
     transformIndexHtml(_, context) {
       return [
         {

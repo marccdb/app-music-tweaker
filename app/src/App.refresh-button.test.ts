@@ -97,7 +97,7 @@ function createMockStore(overrides: Record<string, unknown> = {}) {
 describe('App refresh button permission UI', () => {
   beforeEach(() => {
     mockStore = createMockStore()
-    localStorage.setItem('tuneforge-theme', 'light')
+    localStorage.setItem('modaudio-theme', 'light')
   })
 
   afterEach(() => {

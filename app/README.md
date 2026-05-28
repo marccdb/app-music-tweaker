@@ -1,4 +1,4 @@
-# App Music Tweaker (Electron Baseline)
+# ModAudio (Electron Baseline)
 
 Desktop-first practice workflow app built with Vue 3 + Vite + Electron.
 

@@ -1,7 +1,7 @@
 import { openDB, type DBSchema } from 'idb'
 import type { PracticeProject } from '../types/practice'
 
-const DB_NAME = 'anytune-practice-db'
+const DB_NAME = 'modaudio-practice-db'
 const DB_VERSION = 1
 const STORE_NAME = 'projects'
 

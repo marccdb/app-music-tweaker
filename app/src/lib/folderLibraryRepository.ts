@@ -1,7 +1,7 @@
 import { openDB, type DBSchema } from 'idb'
 import type { FolderTrack, LibrarySnapshot } from '../types/practice'
 
-const DB_NAME = 'anytune-library-db'
+const DB_NAME = 'modaudio-library-db'
 const DB_VERSION = 1
 const STORE_NAME = 'library'
 const SNAPSHOT_KEY = 'snapshot'
