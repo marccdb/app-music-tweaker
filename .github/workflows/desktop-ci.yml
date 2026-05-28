@@ -136,9 +136,10 @@ jobs:
       - name: Ensure release exists
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --generate-notes --title "$TAG"
+          gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1 || gh release create "$TAG" --repo "$GH_REPO" --generate-notes --title "$TAG"
 
   desktop-release-assets:
     name: Desktop release (${{ matrix.name }})
@@ -189,6 +190,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
           RELEASE_GLOB: ${{ matrix.release_glob }}
         run: |
@@ -198,4 +200,4 @@ jobs:
             echo "No release files found for pattern: $RELEASE_GLOB"
             exit 1
           fi
-          gh release upload "$TAG" "${files[@]}" --clobber
+          gh release upload "$TAG" "${files[@]}" --repo "$GH_REPO" --clobber
