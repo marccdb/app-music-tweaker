@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import path from 'node:path'
 import process from 'node:process'
 
 const platformTargetByOs = {
@@ -13,11 +14,11 @@ if (!targetFlag) {
   process.exit(1)
 }
 
-const args = ['exec', 'electron-builder', '--', '--dir', '--publish', 'never', '--config.compression=store', targetFlag]
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+const electronBuilderCli = path.resolve('node_modules', 'electron-builder', 'cli.js')
+const args = ['--dir', '--publish', 'never', '--config.compression=store', targetFlag]
 
-console.log(`Running package smoke: ${npmCommand} ${args.join(' ')}`)
-execFileSync(npmCommand, args, {
+console.log(`Running package smoke: ${process.execPath} ${electronBuilderCli} ${args.join(' ')}`)
+execFileSync(process.execPath, [electronBuilderCli, ...args], {
   stdio: 'inherit',
   env: {
     ...process.env,
