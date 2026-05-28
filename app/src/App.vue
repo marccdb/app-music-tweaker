@@ -243,7 +243,7 @@ onBeforeUnmount(() => {
           <div class="card-body d-flex flex-column gap-3">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
               <div>
-                <h1 class="display-6 fw-bold mb-1">TuneForge</h1>
+                <h1 class="display-6 fw-bold mb-1">Tune-Forge</h1>
                 <p class="text-body-secondary mb-0">
                   Practice studio: tempo, pitch, A/B loops, markers, per-song local save.
                 </p>
