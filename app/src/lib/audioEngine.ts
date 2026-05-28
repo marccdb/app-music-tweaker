@@ -54,7 +54,7 @@ export class AudioEngine {
     try {
       this.pause()
       const ctx = this.ensureContext()
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
 
       const nextDuration = audioBuffer.duration
       const nextLoop = normalizeLoop({ ...this.loop, endSec: nextDuration }, nextDuration)

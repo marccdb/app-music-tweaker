@@ -1,13 +1,13 @@
-import { BrowserWindow as e, app as t, dialog as n, ipcMain as r, session as i } from "electron";
-import { promises as a } from "node:fs";
-import o from "node:path";
-import { fileURLToPath as s } from "node:url";
+import { BrowserWindow as e, app as t, dialog as n, ipcMain as r, net as i, protocol as a, session as o } from "electron";
+import { promises as s } from "node:fs";
+import c from "node:path";
+import { fileURLToPath as l, pathToFileURL as u } from "node:url";
 //#region electron/main.ts
-var c = {
+var d = {
 	pickFolder: "desktop:pick-folder",
 	refreshFolder: "desktop:refresh-folder",
 	readTrack: "desktop:read-track"
-}, l = new Set([
+}, f = new Set([
 	".aac",
 	".aif",
 	".aiff",
@@ -26,7 +26,7 @@ var c = {
 	".weba",
 	".webm",
 	".wma"
-]), u = {
+]), p = {
 	".aac": "audio/aac",
 	".aif": "audio/aiff",
 	".aiff": "audio/aiff",
@@ -45,139 +45,221 @@ var c = {
 	".weba": "audio/webm",
 	".webm": "video/webm",
 	".wma": "audio/x-ms-wma"
-}, d = s(import.meta.url), f = o.dirname(d), p = /* @__PURE__ */ new Map(), m = /* @__PURE__ */ new Map(), h = 1;
-function g(e) {
+}, m = l(import.meta.url), h = c.dirname(m), g = c.join(h, "../dist"), _ = "tuneforge", v = "app", y = `${_}://${v}/index.html`, b = 128, x = 4096, S = 200;
+a.registerSchemesAsPrivileged([{
+	scheme: _,
+	privileges: {
+		standard: !0,
+		secure: !0,
+		supportFetchAPI: !0,
+		stream: !0
+	}
+}]);
+var C = /* @__PURE__ */ new Map(), w = /* @__PURE__ */ new Map(), T = 1;
+function E(e) {
 	return {
 		ok: !0,
 		data: e
 	};
 }
-function _(e, t) {
+function D(e, t) {
 	return {
 		ok: !1,
 		code: e,
 		message: t
 	};
 }
-function v(e) {
-	return o.resolve(e);
+function O(e) {
+	return typeof e == "object" && !!e && !Array.isArray(e);
 }
-function y(e, t) {
-	return o.relative(e, t).split(o.sep).join("/");
+function k(e) {
+	return c.resolve(e);
 }
-function b(e, t) {
-	let n = o.relative(e, t);
-	return n === "" || !n.startsWith("..") && !o.isAbsolute(n);
+function A(e, t) {
+	return c.relative(e, t).split(c.sep).join("/");
 }
-function x(e) {
-	return l.has(o.extname(e).toLowerCase());
+function j(e, t) {
+	let n = c.relative(e, t);
+	return n === "" || !n.startsWith("..") && !c.isAbsolute(n);
 }
-function S(e) {
-	let t = p.get(e);
+function M(e) {
+	return e.byteOffset === 0 && e.byteLength === e.buffer.byteLength ? e.buffer : e.buffer.slice(e.byteOffset, e.byteOffset + e.byteLength);
+}
+function N(e, t, n) {
+	if (!O(e)) return null;
+	let r = e[t];
+	return typeof r != "string" || r.length === 0 || r.length > n || r.includes("\0") ? null : r;
+}
+function P(e) {
+	return c.isAbsolute(e) || e.startsWith("/") || e.startsWith("\\") ? !1 : e.replace(/\\/g, "/").split("/").every((e) => e !== "" && e !== "." && e !== "..");
+}
+function F(e) {
+	try {
+		let t = new URL(e);
+		if (t.protocol === `${_}:`) return t.hostname === v;
+		let n = process.env.VITE_DEV_SERVER_URL;
+		if (!n) return !1;
+		let r = new URL(n);
+		return t.origin === r.origin;
+	} catch {
+		return !1;
+	}
+}
+function I(e) {
+	return F(e.senderFrame?.url || e.sender.getURL()) ? null : D("IPC_SENDER_FORBIDDEN", "IPC sender is not trusted.");
+}
+function L(e) {
+	try {
+		let t = new URL(e);
+		if (t.protocol !== `${_}:` || t.hostname !== v) return null;
+		let n = decodeURIComponent(t.pathname === "/" ? "/index.html" : t.pathname).slice(1), r = k(c.join(g, n));
+		return j(g, r) ? r : null;
+	} catch {
+		return null;
+	}
+}
+function R() {
+	a.handle(_, async (e) => {
+		let t = L(e.url);
+		if (!t) return new Response("Not found", { status: 404 });
+		try {
+			return (await s.stat(t)).isFile() ? i.fetch(u(t).toString()) : new Response("Not found", { status: 404 });
+		} catch {
+			return new Response("Not found", { status: 404 });
+		}
+	});
+}
+function z(e) {
+	let t = (e, t) => {
+		F(t) || e.preventDefault();
+	};
+	e.webContents.on("will-navigate", t), e.webContents.on("will-redirect", t), e.webContents.on("will-attach-webview", (e) => e.preventDefault()), e.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+}
+async function B() {
+	await new Promise((e) => {
+		setImmediate(e);
+	});
+}
+function V(e) {
+	return f.has(c.extname(e).toLowerCase());
+}
+function H(e) {
+	let t = C.get(e);
 	if (t) return t;
-	let n = `folder_${h++}`;
-	return p.set(e, n), n;
+	let n = `folder_${T++}`;
+	return C.set(e, n), n;
 }
-async function C(e) {
-	let t = [], n = /* @__PURE__ */ new Map(), r = v(e), i = S(r);
-	async function s(e) {
-		let i = await a.readdir(e, { withFileTypes: !0 });
-		for (let c of i) {
-			let i = o.join(e, c.name);
-			if (c.isSymbolicLink()) continue;
-			if (c.isDirectory()) {
-				await s(i);
+async function U(e) {
+	let t = [], n = /* @__PURE__ */ new Map(), r = k(e), i = H(r), a = 0;
+	async function o(e) {
+		let i = await s.readdir(e, { withFileTypes: !0 });
+		for (let l of i) {
+			a += 1, a % S === 0 && await B();
+			let i = c.join(e, l.name);
+			if (l.isSymbolicLink()) continue;
+			if (l.isDirectory()) {
+				await o(i);
 				continue;
 			}
-			if (!c.isFile() || !x(i)) continue;
-			let l = await a.stat(i), u = y(r, i), d = `${u}:${l.size}:${Math.trunc(l.mtimeMs)}`, f = {
-				id: d,
-				name: c.name,
-				relativePath: u,
-				fingerprint: d,
-				size: l.size,
-				lastModified: Math.trunc(l.mtimeMs)
+			if (!l.isFile() || !V(i)) continue;
+			let u = await s.stat(i), d = A(r, i), f = `${d}:${u.size}:${Math.trunc(u.mtimeMs)}`, p = {
+				id: f,
+				name: l.name,
+				relativePath: d,
+				fingerprint: f,
+				size: u.size,
+				lastModified: Math.trunc(u.mtimeMs)
 			};
-			t.push(f), n.set(u, {
+			t.push(p), n.set(d, {
 				absolutePath: i,
-				track: f
+				track: p
 			});
 		}
 	}
-	return await s(r), t.sort((e, t) => e.relativePath.localeCompare(t.relativePath, void 0, { sensitivity: "base" })), {
+	return await o(r), t.sort((e, t) => e.relativePath.localeCompare(t.relativePath, void 0, { sensitivity: "base" })), {
 		folderId: i,
 		rootPath: r,
 		tracks: t,
 		byRelativePath: n
 	};
 }
-async function w() {
+async function W() {
 	let t = new e({
 		width: 1400,
 		height: 920,
+		show: !1,
 		webPreferences: {
-			preload: o.join(f, "preload.mjs"),
+			preload: c.join(h, "preload.mjs"),
 			contextIsolation: !0,
 			nodeIntegration: !1,
 			sandbox: !0
 		}
 	});
-	t.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+	z(t), t.once("ready-to-show", () => {
+		t.show();
+	});
 	let n = process.env.VITE_DEV_SERVER_URL;
-	return n ? await t.loadURL(n) : await t.loadFile(o.join(f, "../dist/index.html")), t;
+	return n ? await t.loadURL(n) : await t.loadURL(y), t;
 }
-function T() {
-	r.handle(c.pickFolder, async () => {
-		let t = e.getFocusedWindow(), r = {
+function G() {
+	r.handle(d.pickFolder, async (t) => {
+		let r = I(t);
+		if (r) return r;
+		let i = e.getFocusedWindow(), a = {
 			title: "Select music folder",
 			properties: ["openDirectory", "dontAddToRecent"]
-		}, i = t ? await n.showOpenDialog(t, r) : await n.showOpenDialog(r);
-		if (i.canceled || i.filePaths.length === 0) return _("PICKER_CANCELLED", "Folder selection cancelled.");
-		let a = v(i.filePaths[0]);
+		}, o = i ? await n.showOpenDialog(i, a) : await n.showOpenDialog(a);
+		if (o.canceled || o.filePaths.length === 0) return D("PICKER_CANCELLED", "Folder selection cancelled.");
+		let s = k(o.filePaths[0]);
 		try {
-			let e = await C(a);
-			return m.set(e.folderId, e), g({
+			let e = await U(s);
+			return w.set(e.folderId, e), E({
 				folderId: e.folderId,
-				folderName: o.basename(e.rootPath),
+				folderName: c.basename(e.rootPath),
 				tracks: e.tracks
 			});
 		} catch (e) {
-			return _("SCAN_FAILED", e instanceof Error ? e.message : "Failed to scan folder.");
+			return D("SCAN_FAILED", e instanceof Error ? e.message : "Failed to scan folder.");
 		}
-	}), r.handle(c.refreshFolder, async (e, t) => {
-		let n = t?.folderId ?? "", r = m.get(n);
-		if (!n || !r) return _("FOLDER_FORBIDDEN", "Folder id is not in allowlist.");
+	}), r.handle(d.refreshFolder, async (e, t) => {
+		let n = I(e);
+		if (n) return n;
+		let r = N(t, "folderId", b) ?? "", i = w.get(r);
+		if (!r || !i) return D("FOLDER_FORBIDDEN", "Folder id is not in allowlist.");
 		try {
 			let e = {
-				...await C(r.rootPath),
-				folderId: r.folderId
+				...await U(i.rootPath),
+				folderId: i.folderId
 			};
-			return m.set(n, e), g({ tracks: e.tracks });
+			return w.set(r, e), E({ tracks: e.tracks });
 		} catch (e) {
-			return _("SCAN_FAILED", e instanceof Error ? e.message : "Failed to refresh folder.");
+			return D("SCAN_FAILED", e instanceof Error ? e.message : "Failed to refresh folder.");
 		}
-	}), r.handle(c.readTrack, async (e, t) => {
-		let n = t?.folderId ?? "", r = t?.relativePath ?? "", i = m.get(n);
-		if (!i) return _("TRACK_FORBIDDEN", "Folder id is not in allowlist.");
-		let s = i.byRelativePath.get(r);
-		if (!s || !b(i.rootPath, s.absolutePath)) return _("TRACK_FORBIDDEN", "Track path is not in allowlist.");
+	}), r.handle(d.readTrack, async (e, t) => {
+		let n = I(e);
+		if (n) return n;
+		let r = N(t, "folderId", b) ?? "", i = N(t, "relativePath", x) ?? "", a = w.get(r);
+		if (!a) return D("TRACK_FORBIDDEN", "Folder id is not in allowlist.");
+		if (!P(i)) return D("TRACK_FORBIDDEN", "Track path is not valid.");
+		let o = a.byRelativePath.get(i);
+		if (!o || !j(a.rootPath, o.absolutePath)) return D("TRACK_FORBIDDEN", "Track path is not in allowlist.");
 		try {
-			let [e, t] = await Promise.all([a.stat(s.absolutePath), a.readFile(s.absolutePath)]);
-			if (!e.isFile()) return _("TRACK_NOT_FILE", "Track path is not a file.");
-			let n = o.extname(s.absolutePath).toLowerCase();
-			return g({
-				name: o.basename(s.absolutePath),
-				mimeType: u[n] ?? "application/octet-stream",
-				arrayBuffer: t.buffer.slice(t.byteOffset, t.byteOffset + t.byteLength)
+			let [e, t] = await Promise.all([s.stat(o.absolutePath), s.readFile(o.absolutePath)]);
+			if (!e.isFile()) return D("TRACK_NOT_FILE", "Track path is not a file.");
+			let n = c.extname(o.absolutePath).toLowerCase();
+			return E({
+				name: c.basename(o.absolutePath),
+				mimeType: p[n] ?? "application/octet-stream",
+				arrayBuffer: M(t)
 			});
 		} catch (e) {
-			return _("READ_FAILED", e instanceof Error ? e.message : "Failed to read track.");
+			return D("READ_FAILED", e instanceof Error ? e.message : "Failed to read track.");
 		}
 	});
 }
 t.whenReady().then(async () => {
-	i.defaultSession.setPermissionRequestHandler((e, t, n) => n(!1)), T(), await w(), t.on("activate", async () => {
-		e.getAllWindows().length === 0 && await w();
+	R(), o.defaultSession.setPermissionRequestHandler((e, t, n) => n(!1)), G(), await W(), t.on("activate", async () => {
+		e.getAllWindows().length === 0 && await W();
 	});
 }), t.on("window-all-closed", () => {
 	process.platform !== "darwin" && t.quit();

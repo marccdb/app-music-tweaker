@@ -1,7 +1,17 @@
-import { app, BrowserWindow, dialog, ipcMain, session, type OpenDialogOptions } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  net,
+  protocol,
+  session,
+  type IpcMainInvokeEvent,
+  type OpenDialogOptions,
+} from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 type OkResult<T> = { ok: true; data: T }
 type ErrResult = { ok: false; code: string; message: string }
@@ -81,6 +91,25 @@ const MIME_BY_EXT: Record<string, string> = {
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+const DIST_DIR = path.join(__dirname, '../dist')
+const APP_PROTOCOL = 'tuneforge'
+const APP_PROTOCOL_HOST = 'app'
+const APP_INDEX_URL = `${APP_PROTOCOL}://${APP_PROTOCOL_HOST}/index.html`
+const MAX_FOLDER_ID_LENGTH = 128
+const MAX_RELATIVE_PATH_LENGTH = 4096
+const SCAN_YIELD_INTERVAL = 200
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: APP_PROTOCOL,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+    },
+  },
+])
 
 type FolderEntry = {
   absolutePath: string
@@ -106,6 +135,10 @@ function err(code: string, message: string): ErrResult {
   return { ok: false, code, message }
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 function normalizeAbsolutePath(inputPath: string): string {
   return path.resolve(inputPath)
 }
@@ -117,6 +150,105 @@ function toRelativeSlashPath(fromRoot: string, absolutePath: string): string {
 function isPathInside(root: string, targetPath: string): boolean {
   const relative = path.relative(root, targetPath)
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+}
+
+function bufferToArrayBuffer(buffer: Buffer): ArrayBuffer {
+  if (buffer.byteOffset === 0 && buffer.byteLength === buffer.buffer.byteLength) {
+    return buffer.buffer as ArrayBuffer
+  }
+  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer
+}
+
+function readStringField(payload: unknown, fieldName: string, maxLength: number): string | null {
+  if (!isPlainObject(payload)) return null
+  const value = payload[fieldName]
+  if (typeof value !== 'string') return null
+  if (value.length === 0 || value.length > maxLength || value.includes('\0')) return null
+  return value
+}
+
+function isSafeRelativePath(relativePath: string): boolean {
+  if (path.isAbsolute(relativePath) || relativePath.startsWith('/') || relativePath.startsWith('\\')) {
+    return false
+  }
+  const normalized = relativePath.replace(/\\/g, '/')
+  return normalized.split('/').every((part) => part !== '' && part !== '.' && part !== '..')
+}
+
+function isTrustedRendererUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl)
+    if (url.protocol === `${APP_PROTOCOL}:`) {
+      return url.hostname === APP_PROTOCOL_HOST
+    }
+
+    const devServerUrl = process.env.VITE_DEV_SERVER_URL
+    if (!devServerUrl) return false
+    const devUrl = new URL(devServerUrl)
+    return url.origin === devUrl.origin
+  } catch {
+    return false
+  }
+}
+
+function validateIpcSender(event: IpcMainInvokeEvent): ErrResult | null {
+  const frameUrl = event.senderFrame?.url || event.sender.getURL()
+  if (isTrustedRendererUrl(frameUrl)) return null
+  return err('IPC_SENDER_FORBIDDEN', 'IPC sender is not trusted.')
+}
+
+function resolveAppProtocolPath(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl)
+    if (url.protocol !== `${APP_PROTOCOL}:` || url.hostname !== APP_PROTOCOL_HOST) {
+      return null
+    }
+
+    const relativePath = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname).slice(1)
+    const targetPath = normalizeAbsolutePath(path.join(DIST_DIR, relativePath))
+    if (!isPathInside(DIST_DIR, targetPath)) return null
+    return targetPath
+  } catch {
+    return null
+  }
+}
+
+function registerAppProtocol(): void {
+  protocol.handle(APP_PROTOCOL, async (request) => {
+    const targetPath = resolveAppProtocolPath(request.url)
+    if (!targetPath) {
+      return new Response('Not found', { status: 404 })
+    }
+
+    try {
+      const stat = await fs.stat(targetPath)
+      if (!stat.isFile()) {
+        return new Response('Not found', { status: 404 })
+      }
+      return net.fetch(pathToFileURL(targetPath).toString())
+    } catch {
+      return new Response('Not found', { status: 404 })
+    }
+  })
+}
+
+function installNavigationGuards(win: BrowserWindow): void {
+  const blockUntrustedNavigation = (event: Electron.Event, url: string) => {
+    if (!isTrustedRendererUrl(url)) {
+      event.preventDefault()
+    }
+  }
+
+  win.webContents.on('will-navigate', blockUntrustedNavigation)
+  win.webContents.on('will-redirect', blockUntrustedNavigation)
+  win.webContents.on('will-attach-webview', (event) => event.preventDefault())
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+}
+
+async function yieldToEventLoop(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve)
+  })
 }
 
 function isSupportedMediaPath(absolutePath: string): boolean {
@@ -136,10 +268,16 @@ async function scanFolder(rootPath: string): Promise<CachedFolder> {
   const byRelativePath = new Map<string, FolderEntry>()
   const normalizedRoot = normalizeAbsolutePath(rootPath)
   const folderId = buildFolderId(normalizedRoot)
+  let scannedEntries = 0
 
   async function walk(currentDir: string): Promise<void> {
     const entries = await fs.readdir(currentDir, { withFileTypes: true })
     for (const entry of entries) {
+      scannedEntries += 1
+      if (scannedEntries % SCAN_YIELD_INTERVAL === 0) {
+        await yieldToEventLoop()
+      }
+
       const absolutePath = path.join(currentDir, entry.name)
       if (entry.isSymbolicLink()) {
         continue
@@ -182,6 +320,7 @@ async function createMainWindow(): Promise<BrowserWindow> {
   const win = new BrowserWindow({
     width: 1400,
     height: 920,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       contextIsolation: true,
@@ -190,20 +329,26 @@ async function createMainWindow(): Promise<BrowserWindow> {
     },
   })
 
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  installNavigationGuards(win)
+  win.once('ready-to-show', () => {
+    win.show()
+  })
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL
   if (devServerUrl) {
     await win.loadURL(devServerUrl)
   } else {
-    await win.loadFile(path.join(__dirname, '../dist/index.html'))
+    await win.loadURL(APP_INDEX_URL)
   }
 
   return win
 }
 
 function registerIpcHandlers(): void {
-  ipcMain.handle(CHANNELS.pickFolder, async (): Promise<Result<PickFolderData>> => {
+  ipcMain.handle(CHANNELS.pickFolder, async (event): Promise<Result<PickFolderData>> => {
+    const senderError = validateIpcSender(event)
+    if (senderError) return senderError
+
     const focusedWindow = BrowserWindow.getFocusedWindow()
     const options: OpenDialogOptions = {
       title: 'Select music folder',
@@ -234,8 +379,11 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(
     CHANNELS.refreshFolder,
-    async (_event, payload: RefreshFolderInput): Promise<Result<RefreshFolderData>> => {
-      const folderId = payload?.folderId ?? ''
+    async (event, payload: RefreshFolderInput): Promise<Result<RefreshFolderData>> => {
+      const senderError = validateIpcSender(event)
+      if (senderError) return senderError
+
+      const folderId = readStringField(payload, 'folderId', MAX_FOLDER_ID_LENGTH) ?? ''
       const existing = folderCacheById.get(folderId)
       if (!folderId || !existing) {
         return err('FOLDER_FORBIDDEN', 'Folder id is not in allowlist.')
@@ -258,12 +406,19 @@ function registerIpcHandlers(): void {
     },
   )
 
-  ipcMain.handle(CHANNELS.readTrack, async (_event, payload: ReadTrackInput): Promise<Result<ReadTrackData>> => {
-    const folderId = payload?.folderId ?? ''
-    const relativePath = payload?.relativePath ?? ''
+  ipcMain.handle(CHANNELS.readTrack, async (event, payload: ReadTrackInput): Promise<Result<ReadTrackData>> => {
+    const senderError = validateIpcSender(event)
+    if (senderError) return senderError
+
+    const folderId = readStringField(payload, 'folderId', MAX_FOLDER_ID_LENGTH) ?? ''
+    const relativePath = readStringField(payload, 'relativePath', MAX_RELATIVE_PATH_LENGTH) ?? ''
     const existing = folderCacheById.get(folderId)
     if (!existing) {
       return err('TRACK_FORBIDDEN', 'Folder id is not in allowlist.')
+    }
+
+    if (!isSafeRelativePath(relativePath)) {
+      return err('TRACK_FORBIDDEN', 'Track path is not valid.')
     }
 
     const entry = existing.byRelativePath.get(relativePath)
@@ -280,7 +435,7 @@ function registerIpcHandlers(): void {
       return ok({
         name: path.basename(entry.absolutePath),
         mimeType: MIME_BY_EXT[extension] ?? 'application/octet-stream',
-        arrayBuffer: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+        arrayBuffer: bufferToArrayBuffer(buffer),
       })
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'Failed to read track.'
@@ -290,6 +445,7 @@ function registerIpcHandlers(): void {
 }
 
 app.whenReady().then(async () => {
+  registerAppProtocol()
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   registerIpcHandlers()
   await createMainWindow()

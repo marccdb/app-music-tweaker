@@ -26,6 +26,7 @@
     "wavesurfer.js": "^7.12.7"
   },
   "devDependencies": {
+    "@electron/fuses": "^2.1.1",
     "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/vue": "^8.1.0",
@@ -44,6 +45,8 @@
   },
   "build": {
     "appId": "com.appmusictweaker.app",
+    "asar": true,
+    "afterPack": "scripts/afterPack.cjs",
     "directories": {
       "output": "release"
     },

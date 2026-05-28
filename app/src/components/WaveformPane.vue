@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import WaveSurfer from 'wavesurfer.js'
-import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js'
+import type WaveSurfer from 'wavesurfer.js'
 import type { Region } from 'wavesurfer.js/dist/plugins/regions.esm.js'
 import { usePracticeStore } from '../stores/practice'
+
+type RegionsPluginModule = typeof import('wavesurfer.js/dist/plugins/regions.esm.js').default
+type RegionsPluginInstance = ReturnType<RegionsPluginModule['create']>
 
 const store = usePracticeStore()
 
@@ -21,9 +23,11 @@ const B_MARKER_LINE_COLOR = '#6ecce6'
 const REGULAR_MARKER_LINE_COLOR = '#e35353'
 
 let waveSurfer: WaveSurfer | null = null
-let regionsPlugin: ReturnType<typeof RegionsPlugin.create> | null = null
+let regionsPlugin: RegionsPluginInstance | null = null
 const loopRegions = new Map<string, Region>()
 let updatingLoopSectionFromRegion = false
+let waveSurferReady: Promise<void> | null = null
+const waveSurferCleanups: Array<() => void> = []
 const isPanning = ref(false)
 let panStartX = 0
 let panStartScroll = 0
@@ -404,13 +408,31 @@ function refreshLoopSections() {
 }
 
 async function loadWaveform(url: string) {
+  await ensureWaveSurfer()
   if (!waveSurfer) return
   await waveSurfer.load(url)
   refreshFitZoom(0)
   syncWaveMetrics()
 }
 
-onMounted(() => {
+async function ensureWaveSurfer(): Promise<void> {
+  if (waveSurfer || waveSurferReady) {
+    await waveSurferReady
+    return
+  }
+  if (!host.value) return
+
+  waveSurferReady = createWaveSurfer()
+  await waveSurferReady
+}
+
+async function createWaveSurfer(): Promise<void> {
+  if (!host.value) return
+
+  const [{ default: WaveSurfer }, { default: RegionsPlugin }] = await Promise.all([
+    import('wavesurfer.js'),
+    import('wavesurfer.js/dist/plugins/regions.esm.js'),
+  ])
   if (!host.value) return
 
   regionsPlugin = RegionsPlugin.create()
@@ -434,8 +456,14 @@ onMounted(() => {
   })
   const unsubscribeRedraw = waveSurfer.on('redraw', syncWaveMetrics)
   const unsubscribeZoom = waveSurfer.on('zoom', syncWaveMetrics)
+  waveSurferCleanups.push(unsubscribeScroll, unsubscribeRedraw, unsubscribeZoom)
 
-  watch(
+  fitPxPerSec.value = getFitPxPerSec()
+  syncWaveMetrics()
+}
+
+onMounted(() => {
+  const stopFileObjectUrlWatch = watch(
     () => store.fileObjectUrl,
     (url) => {
       if (!url) return
@@ -447,7 +475,7 @@ onMounted(() => {
     { immediate: true },
   )
 
-  watch(
+  const stopDurationWatch = watch(
     () => store.durationSec,
     (durationSec) => {
       if (!durationSec) return
@@ -455,7 +483,7 @@ onMounted(() => {
     },
   )
 
-  watch(
+  const stopLoopSectionsWatch = watch(
     () => [store.loopSections, store.activeLoopSectionId],
     () => {
       if (updatingLoopSectionFromRegion) return
@@ -464,13 +492,13 @@ onMounted(() => {
     { deep: true },
   )
 
-  watch(
+  const stopMarkersWatch = watch(
     () => store.markers,
     () => refreshMarkers(),
     { deep: true },
   )
 
-  watch(
+  const stopCurrentTimeWatch = watch(
     () => store.currentTimeSec,
     (timeSec) => {
       if (!waveSurfer || !store.durationSec) return
@@ -489,9 +517,11 @@ onMounted(() => {
     observer.disconnect()
     document.removeEventListener('pointerdown', closeContextMenu)
     window.removeEventListener('resize', onWindowResize)
-    unsubscribeScroll()
-    unsubscribeRedraw()
-    unsubscribeZoom()
+    stopFileObjectUrlWatch()
+    stopDurationWatch()
+    stopLoopSectionsWatch()
+    stopMarkersWatch()
+    stopCurrentTimeWatch()
   })
 })
 
@@ -500,6 +530,10 @@ onBeforeUnmount(() => {
     region.remove()
   }
   loopRegions.clear()
+  for (const cleanup of waveSurferCleanups) {
+    cleanup()
+  }
+  waveSurferCleanups.length = 0
   waveSurfer?.destroy()
 })
 </script>
