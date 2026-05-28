@@ -27,4 +27,4 @@ Workflow: `.github/workflows/desktop-ci.yml`
 - license gate + notices drift check
 - long-file memory behavior smoke
 - packaging smoke on Linux/macOS/Windows
-- tag release publish (`v*` tags): Linux AppImage, Windows NSIS `.exe`, macOS Apple Silicon `.dmg` uploaded to GitHub Releases
+- release publish: on `v*` tag push or manual `workflow_dispatch`, CI creates/updates GitHub Release and uploads Linux AppImage, Windows NSIS `.exe`, macOS Apple Silicon `.dmg`
