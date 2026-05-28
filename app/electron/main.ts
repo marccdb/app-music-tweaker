@@ -395,7 +395,7 @@ async function scanFolder(rootPath: string): Promise<CachedFolder> {
 
 async function createMainWindow(): Promise<BrowserWindow> {
   const win = new BrowserWindow({
-    width: 1400,
+    width: 1680,
     height: 920,
     show: false,
     webPreferences: {

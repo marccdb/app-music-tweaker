@@ -253,10 +253,9 @@ onBeforeUnmount(() => {
               </button>
             </div>
 
-            <div class="d-flex flex-wrap align-items-center gap-2" v-if="store.trackName || store.isImporting || !hasDesktopApi">
+            <div class="d-flex flex-wrap align-items-center gap-2" v-if="store.trackName || store.isImporting">
               <span class="badge text-bg-secondary" v-if="store.trackName">{{ store.trackName }}</span>
               <span class="badge text-bg-info" v-if="store.isImporting">Loading waveform...</span>
-              <span class="badge text-bg-warning" v-if="!hasDesktopApi">Folder picker fallback mode</span>
             </div>
 
             <div class="alert alert-danger py-2 px-3 mb-0" v-if="store.error">{{ store.error }}</div>
@@ -264,28 +263,12 @@ onBeforeUnmount(() => {
         </section>
 
         <section class="card shadow-sm border-0 mb-3">
-          <div class="card-body">
+          <div class="card-body player-panel-body d-flex flex-column gap-2">
             <WaveformPane />
-          </div>
-        </section>
-
-        <section class="card shadow-sm border-0 mb-3">
-          <div class="card-body d-flex flex-column gap-3">
-            <div class="d-flex justify-content-between align-items-center">
-              <button
-                type="button"
-                class="btn btn-success"
-                :disabled="controlsDisabled"
-                @click="store.playPause"
-              >
-                {{ store.isPlaying ? 'Pause' : 'Play' }}
-              </button>
-              <strong class="fs-5">{{ formattedTime }}</strong>
-            </div>
 
             <input
               v-model.number="seekPercent"
-              class="form-range"
+              class="form-range song-seek-slider mb-0"
               type="range"
               min="0"
               max="100"
@@ -293,7 +276,72 @@ onBeforeUnmount(() => {
               :disabled="controlsDisabled"
             />
 
-            <div class="small text-body-secondary">
+            <div class="player-bottom-row">
+              <div class="player-loop-cluster">
+                <h2 class="section-title mb-1">Loop Controls</h2>
+                <div class="player-loop-actions" role="group" aria-label="Loop controls">
+                  <button
+                    type="button"
+                    class="btn btn-sm loop-action-btn"
+                    :class="hasPendingLoopStart ? 'btn-primary' : 'btn-outline-primary'"
+                    :disabled="controlsDisabled"
+                    :title="hasPendingLoopStart ? 'Reset A and set loop start (A) from playhead' : 'Set loop start (A) from playhead'"
+                    :aria-label="hasPendingLoopStart ? 'Reset A and set loop start (A) from playhead' : 'Set loop start (A) from playhead'"
+                    @click="store.addLoopSection"
+                  >
+                    <i class="bi" :class="hasPendingLoopStart ? 'bi-skip-start-circle-fill' : 'bi-skip-start-circle'" aria-hidden="true"></i>
+                    <span>{{ hasPendingLoopStart ? 'Reset A' : 'Set A' }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-primary loop-action-btn"
+                    :disabled="controlsDisabled || !hasPendingLoopStart"
+                    title="Set loop end (B) and finalize section from playhead"
+                    aria-label="Set loop end (B) and finalize section from playhead"
+                    @click="store.setLoopEndFromPlayhead"
+                  >
+                    <i class="bi bi-skip-end-circle" aria-hidden="true"></i>
+                    <span>Set B</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-secondary loop-action-btn"
+                    :disabled="controlsDisabled || !canResetLoopDefinition"
+                    title="Reset A and B loop points"
+                    aria-label="Reset A and B loop points"
+                    @click="store.resetLoopDefinition"
+                  >
+                    <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
+                    <span>Reset</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-secondary loop-action-btn"
+                    :disabled="controlsDisabled || store.loopSections.length === 0"
+                    :title="allLoopSectionsEnabled ? 'Disable all loop sections' : 'Enable all loop sections'"
+                    :aria-label="allLoopSectionsEnabled ? 'Disable all loop sections' : 'Enable all loop sections'"
+                    @click="store.setAllLoopSectionsEnabled(!allLoopSectionsEnabled)"
+                  >
+                    <i class="bi" :class="allLoopSectionsEnabled ? 'bi-toggle-on' : 'bi-toggle-off'" aria-hidden="true"></i>
+                    <span>{{ allLoopSectionsEnabled ? 'Disable All' : 'Enable All' }}</span>
+                  </button>
+                </div>
+              </div>
+              <div class="playback-toggle-wrap">
+                <button
+                  type="button"
+                  class="playback-toggle-btn"
+                  :disabled="controlsDisabled"
+                  @click="store.playPause"
+                  :aria-label="store.isPlaying ? 'Pause' : 'Play'"
+                >
+                  <i class="bi" :class="store.isPlaying ? 'bi-pause-circle-fill' : 'bi-play-circle-fill'" aria-hidden="true"></i>
+                </button>
+              </div>
+              <strong class="fs-5 player-time">{{ formattedTime }}</strong>
+            </div>
+
+            <div class="small text-body-secondary player-shortcuts">
               <strong>Shortcuts:</strong>
               <code>Space</code> play/pause,
               <code>A</code> set loop start,
@@ -375,59 +423,9 @@ onBeforeUnmount(() => {
           <div class="col-lg-6">
             <div class="card shadow-sm border-0 h-100">
               <div class="card-body d-flex flex-column gap-3">
-                <h2 class="section-title">Loop Controls</h2>
-
-                <div class="loop-controls-toolbar d-flex flex-wrap align-items-center gap-2">
-                  <button
-                    type="button"
-                    class="btn btn-primary"
-                    :disabled="controlsDisabled"
-                    @click="store.addLoopSection"
-                  >
-                    {{ hasPendingLoopStart ? 'Reset A (Set Start)' : 'Set A (Start Section)' }}
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-outline-primary"
-                    :disabled="controlsDisabled || !hasPendingLoopStart"
-                    @click="store.setLoopEndFromPlayhead"
-                  >
-                    Set B (Finalize)
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-outline-secondary"
-                    :disabled="controlsDisabled || !canResetLoopDefinition"
-                    @click="store.resetLoopDefinition"
-                  >
-                    Reset A/B
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-secondary"
-                    :disabled="controlsDisabled || store.loopSections.length === 0"
-                    @click="store.setAllLoopSectionsEnabled(!allLoopSectionsEnabled)"
-                  >
-                    {{ allLoopSectionsEnabled ? 'Clear All' : 'Enable All' }}
-                  </button>
-                  <div class="loop-mode-group d-flex align-items-center gap-2 ms-auto">
-                    <label class="form-label mb-0">Mode</label>
-                    <select
-                      class="loop-mode-select form-select form-select-sm"
-                      :value="store.loop.mode"
-                      :disabled="controlsDisabled || !activeLoopSection"
-                      @change="store.setLoopMode(($event.target as HTMLSelectElement).value as 'forever' | 'once')"
-                    >
-                      <option value="forever">Loop Forever</option>
-                      <option value="once">Loop Once</option>
-                    </select>
-                  </div>
-                </div>
-                <p class="mb-0 small text-body-secondary">
-                  <span v-if="hasPendingLoopStart">
-                    Pending start A at {{ (store.pendingLoopStartSec ?? 0).toFixed(2) }}s. Set B to finalize this section.
-                  </span>
-                  <span v-else>Set A, then set B. No section is created until B is set.</span>
+                <h2 class="section-title">Loops</h2>
+                <p v-if="hasPendingLoopStart" class="mb-0 small text-body-secondary">
+                  Pending start A at {{ (store.pendingLoopStartSec ?? 0).toFixed(2) }}s. Set B to finalize this section.
                 </p>
                 <p
                   v-if="store.loopInteractionHint"

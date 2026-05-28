@@ -196,7 +196,7 @@ export const usePracticeStore = defineStore('practice', () => {
   })
 
   const unsubscribeLoop = engine.on('loopchange', (nextLoop) => {
-    loop.value = normalizeLoop(nextLoop, durationSec.value || MIN_LOOP_DURATION_SEC)
+    loop.value = normalizeLoop({ ...nextLoop, mode: 'forever' }, durationSec.value || MIN_LOOP_DURATION_SEC)
     if (!activeLoopSectionId.value) return
     loopSections.value = loopSections.value.map((section) =>
       section.id === activeLoopSectionId.value ? { ...section, enabled: loop.value.enabled } : section,
@@ -209,7 +209,7 @@ export const usePracticeStore = defineStore('practice', () => {
 
   const unsubscribeLoaded = engine.on('loaded', ({ duration }) => {
     durationSec.value = duration
-    loop.value = normalizeLoop(loop.value, duration)
+    loop.value = normalizeLoop({ ...loop.value, mode: 'forever' }, duration)
   })
 
   function teardown() {
@@ -571,7 +571,7 @@ export const usePracticeStore = defineStore('practice', () => {
           enabled: activeSection.enabled,
           startSec: activeSection.startSec,
           endSec: activeSection.endSec,
-          mode: project.loop.mode,
+          mode: 'forever',
         }
       : createDefaultLoop(sourceDuration)
 
@@ -601,8 +601,8 @@ export const usePracticeStore = defineStore('practice', () => {
     volume.value = engine.setVolume(value)
   }
 
-  function setLoopMode(mode: LoopMode) {
-    loop.value = { ...loop.value, mode }
+  function setLoopMode(_mode: LoopMode) {
+    loop.value = { ...loop.value, mode: 'forever' }
     engine.setLoop(loop.value)
   }
 
@@ -612,7 +612,7 @@ export const usePracticeStore = defineStore('practice', () => {
   }
 
   function updateLoop(nextLoop: LoopRange) {
-    loop.value = normalizeLoop(nextLoop, durationSec.value || MIN_LOOP_DURATION_SEC)
+    loop.value = normalizeLoop({ ...nextLoop, mode: 'forever' }, durationSec.value || MIN_LOOP_DURATION_SEC)
     if (activeLoopSectionId.value) {
       loopSections.value = loopSections.value.map((section) =>
         section.id === activeLoopSectionId.value
@@ -641,6 +641,7 @@ export const usePracticeStore = defineStore('practice', () => {
         enabled: activeSection.enabled,
         startSec: activeSection.startSec,
         endSec: activeSection.endSec,
+        mode: 'forever',
       },
       durationSec.value || MIN_LOOP_DURATION_SEC,
     )
@@ -761,6 +762,7 @@ export const usePracticeStore = defineStore('practice', () => {
       enabled: section.enabled,
       startSec: section.startSec,
       endSec: section.endSec,
+      mode: 'forever',
     }
     engine.setLoop(loop.value)
     if (jumpToStart) {

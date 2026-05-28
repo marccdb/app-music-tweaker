@@ -13,7 +13,7 @@ const host = ref<HTMLElement | null>(null)
 const scrollHost = ref<HTMLElement | null>(null)
 const contextMenuEl = ref<HTMLElement | null>(null)
 const fitPxPerSec = ref(1)
-const zoomFactor = ref(1.25)
+const zoomFactor = ref(1)
 const MIN_ZOOM_FACTOR = 1
 const MAX_ZOOM_FACTOR = 8
 const ZOOM_STEP = 0.25
@@ -619,10 +619,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .waveform-shell {
-  border: 1px solid var(--bs-border-color);
-  border-radius: 0.75rem;
-  padding: 0.35rem;
-  background: #223343;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
   position: relative;
 }
 

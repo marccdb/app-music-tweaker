@@ -226,7 +226,7 @@ async function Y(e) {
 }
 async function X() {
 	let t = new e({
-		width: 1400,
+		width: 1680,
 		height: 920,
 		show: !1,
 		webPreferences: {
@@ -336,3 +336,4 @@ t.whenReady().then(async () => {
 	process.platform !== "darwin" && t.quit();
 });
 //#endregion
+export {};
