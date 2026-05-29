@@ -238,11 +238,11 @@ jobs:
             build_args: --win nsis --x64 --publish never
             release_glob: release/*.exe
           - name: macos-arm64
-            os: macos-14
+            os: macos-latest
             build_args: --mac dmg --arm64 --publish never
             release_glob: release/*.dmg
           - name: macos-x64
-            os: macos-13
+            os: macos-26-intel
             build_args: --mac dmg --x64 --publish never
             release_glob: release/*.dmg
     defaults:
