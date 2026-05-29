@@ -540,8 +540,19 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="waveform-shell">
-    <div class="wave-controls">
-      <div class="zoom-controls">
+    <div
+      ref="scrollHost"
+      class="wave-scroll"
+      :class="{ 'is-empty': !hasAudio, 'is-panning': isPanning }"
+      @click.left="onWaveLeftClick"
+      @contextmenu.prevent.stop="onWaveContextMenu"
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointercancel="onPointerUp"
+      @wheel.prevent="onWaveWheel"
+    >
+      <div class="zoom-controls" @pointerdown.stop @click.stop @wheel.stop>
         <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!hasAudio || !canZoomOut" @click="zoomOut">
           -
         </button>
@@ -562,19 +573,6 @@ onBeforeUnmount(() => {
           1:1
         </button>
       </div>
-    </div>
-    <div
-      ref="scrollHost"
-      class="wave-scroll"
-      :class="{ 'is-empty': !hasAudio, 'is-panning': isPanning }"
-      @click.left="onWaveLeftClick"
-      @contextmenu.prevent.stop="onWaveContextMenu"
-      @pointerdown="onPointerDown"
-      @pointermove="onPointerMove"
-      @pointerup="onPointerUp"
-      @pointercancel="onPointerUp"
-      @wheel.prevent="onWaveWheel"
-    >
       <div ref="host" class="waveform-host" />
       <div class="ab-markers-overlay">
         <div
@@ -626,23 +624,29 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-.wave-controls {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  z-index: 10;
-}
-
 .zoom-controls {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+  z-index: 40;
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 0.2rem 0.45rem;
-  border: 1px solid rgba(213, 225, 240, 0.2);
+  border: 1px solid rgba(213, 225, 240, 0.14);
   border-radius: 0.45rem;
+  background: rgba(14, 30, 50, 0.4);
+  opacity: 0.38;
+  transition:
+    opacity 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.zoom-controls:hover,
+.zoom-controls:focus-within {
+  opacity: 1;
+  border-color: rgba(213, 225, 240, 0.28);
   background: rgba(14, 30, 50, 0.64);
 }
 
