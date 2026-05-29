@@ -314,7 +314,7 @@ onBeforeUnmount(() => {
                   <button
                     type="button"
                     class="btn btn-sm loop-action-btn"
-                    :class="hasPendingLoopStart ? 'btn-primary' : 'btn-outline-primary'"
+                    :class="hasPendingLoopStart ? 'btn-info' : 'btn-outline-info'"
                     :disabled="controlsDisabled"
                     :title="hasPendingLoopStart ? 'Reset A and set loop start (A) from playhead' : 'Set loop start (A) from playhead'"
                     :aria-label="hasPendingLoopStart ? 'Reset A and set loop start (A) from playhead' : 'Set loop start (A) from playhead'"
@@ -325,7 +325,7 @@ onBeforeUnmount(() => {
                   </button>
                   <button
                     type="button"
-                    class="btn btn-sm btn-outline-primary loop-action-btn"
+                    class="btn btn-sm btn-outline-info loop-action-btn"
                     :disabled="controlsDisabled || !hasPendingLoopStart"
                     title="Set loop end (B) and finalize section from playhead"
                     aria-label="Set loop end (B) and finalize section from playhead"
